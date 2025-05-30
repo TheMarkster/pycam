@@ -1,0 +1,17 @@
+[project]
+name = "pycam"
+version = "0.1.0"
+description = "A Python project named pycam"
+authors = [
+    {name = "Mark Greene", email = "markdanielgreene@gmail.com"}
+]
+license = "MIT"
+readme = "README.md"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.urls]
+homepage = "https://github.com/markg/pycam"
+repository = "https://github.com/markg/pycam"

@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "math2d.h": "c",
+        "cmath": "cpp",
+        "iostream": "cpp"
+    }
+}

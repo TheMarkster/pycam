@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: pycam
+Version: 0.1.0
+Summary: A Python project named pycam
+Author-email: Mark Greene <markdanielgreene@gmail.com>
+License-Expression: MIT
+Project-URL: homepage, https://github.com/markg/pycam
+Project-URL: repository, https://github.com/markg/pycam
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
+# pycam
+pycam
