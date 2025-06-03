@@ -68,11 +68,11 @@ struct mat2d {
     mat2d(float a, float b, float c, float d) : m{{a, b}, {c, d}} {}
 
     static mat2d from_rvec(const vec2d& a, const vec2d& b) {
-        return mat2d(a.v[0], b.v[0], a.v[1], b.v[1]);
+        return mat2d(a.v[0], a.v[1], b.v[0], b.v[1]);
     }
 
     static mat2d from_cvec(const vec2d& a, const vec2d& b) {
-        return mat2d(a.v[0], a.v[1], b.v[0], b.v[1]);
+        return mat2d(a.v[0], b.v[0], a.v[1], b.v[1]);
     }
 
     mat2d operator*(const mat2d& rhs) const {
@@ -202,4 +202,33 @@ inline mat2d rotation_matrix_cw(float angle) {
     float cos_a = std::cos(angle);
     float sin_a = std::sin(angle);
     return mat2d(cos_a, sin_a, -sin_a, cos_a);
+}
+
+float angle(const vec2d& a, const vec2d& b) {
+    return angle_norm(a.normalized(), b.normalized());
+}
+
+float angle_norm(const vec2d& a, const vec2d& b) {
+    // Both vectors are already normalized
+    float angle = std::acos(a.dot(b));
+    if (a.cross(b) > 0) {
+        return angle;
+    }
+    else {
+        return -angle;
+    }
+}
+
+float angle(const vec2d& a) {
+    return angle_norm(a.normalized());
+}
+
+float angle_norm(const vec2d& a) {
+    float angle = std::acos(a[0]);
+    if (a[1] > 0) {
+        return angle;
+    }
+    else {
+        return -angle;
+    }
 }

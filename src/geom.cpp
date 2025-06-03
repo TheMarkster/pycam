@@ -1,7 +1,19 @@
 #include "geom.hpp"
 #include "math2d.hpp"
 #include "sorting.hpp"
+#include <cmath>
 
+bool bounding_box::intersects(const bounding_box &other) const {
+    float _xmin = std::max(other.xmin, xmin);
+    float _xmax = std::min(other.xmax, xmax);
+    if (_xmin >= _xmax) return false; // No intersection in x-axis
+
+    float _ymin = std::max(other.ymin, ymin);
+    float _ymax = std::min(other.ymax, ymax);
+    if (_ymin >= _ymax) return false; // No intersection in y-axis
+
+    return true;
+}
 
 line_segment::line_segment(const vec2d& start, const vec2d& end)
     : segment(start, end) {
@@ -33,19 +45,54 @@ bool line_segment::diverges_from_arc(const arc_segment& first, float direction) 
 
 vec2d line_segment::intersection(const segment& other) const {
     // Find intersection with another segment
-    return other.intersection_with_line(*this);
+    return other.intersection_with_line(*this, true);
 }
 
-vec2d line_segment::intersection_with_line(const line_segment& first) const {
+vec2d line_segment::intersection_with_line(const line_segment& other, bool arg_first) const {
     // Calculate intersection point with another line segment
-    mat2d m = mat2d::from_rvec(nhat, first.nhat);
-    vec2d s_vec = vec2d(s, first.s);
+    mat2d m = mat2d::from_rvec(nhat, other.nhat);
+    vec2d s_vec = vec2d(s, other.s);
     return solve(m, s_vec);
 }
 
-vec2d line_segment::intersection_with_arc(const arc_segment& first) const {
+vec2d line_segment::intersection_with_arc(const arc_segment& arc, bool arc_first) const {
     // Implement logic to find intersection with an arc segment
-    return vec2d(0, 0); // Placeholder
+
+    // Intersect vector with normal going through arc's center
+    // This is the midpoint of possible intersections
+    mat2d m = mat2d::from_rvec(this->nhat, this->vhat);
+    vec2d sol = vec2d(this->s, this->vhat.dot(arc.center));
+    vec2d intersection_point = solve(m, sol);
+
+    // Distance from midpoint to solutions
+    float a = (intersection_point - arc.center).length();
+    float b = pow(arc.radius,2) - pow(a,2);
+    if (abs(b) < 1e-6) {
+        // Midpoint is the intersection point
+        return intersection_point;
+    } else if (b < 0) {
+        // No intersection
+        return vec2d(0, 0); // Placeholder for no intersection
+    }
+    b = sqrt(b);
+
+    // Use closest solution
+    // Find offset vector and reduce length by b
+    vec2d offset_vector;
+    if (arc_first) {
+        offset_vector = intersection_point - this->end;
+    }
+    else {
+        offset_vector = intersection_point - this->start;
+    }
+    float distance = offset_vector.length();
+    offset_vector *= (distance - b) / distance;
+    
+    if (arc_first) {
+        return this->end + offset_vector;
+    } else {
+        return this->start + offset_vector;
+    }
 }
 
 arc_segment::arc_segment(const vec2d& center, float radius, float start_angle, float end_angle, bool is_clockwise) : 
@@ -55,6 +102,39 @@ arc_segment::arc_segment(const vec2d& center, float radius, float start_angle, f
     start = center + nhat_start * radius;
     end = center + nhat_end * radius;
 }
+
+static arc_segment arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
+        vec2d start = vec2d(p0[0], p0[1]);
+        vec2d end = vec2d(p1[0], p1[1]);
+        vec2d diff = (start - end)/2;
+        float d = diff.length();
+        vec2d center = start + diff
+        float delta_angle = std::atan(p0[2])*4.0f; // Convert bulge to angle
+        float r = d / std::sin(delta_angle / 2.0f);
+        if (r > 0) {
+            vec2d nhat = rotate_cw_90(diff.normalized());
+        }
+        else {
+            vec2d nhat = rotate_ccw_90(diff.normalized());
+        }
+        vec2d center = center + nhat * std::sqrt(r * r - d * d);
+        float start_angle = angle(start);
+        float end_angle = angle(end);
+        if (r > 0) {
+            // Clockwise arc; angle decrease from start to end
+            if (end_angle > start_angle) {
+                end_angle -= 2 * M_PI; // Adjust for clockwise direction
+            }
+            return arc_segment(center, r, start, end, true);
+        }
+        else {
+            // Counter-clockwise arc; angle increases from start to end
+            if (end_angle < start_angle) {
+                end_angle += 2 * M_PI; // Adjust for counter-clockwise direction
+            }
+            return arc_segment(center, r, start, end, false);
+        }
+    }
 
 void arc_segment::offset(float distance) {
     radius += distance;
@@ -79,25 +159,128 @@ bool arc_segment::diverges_from_arc(const arc_segment& first, float direction) c
 
 vec2d arc_segment::intersection(const segment& other) const {
     // Find intersection with another segment
-    return other.intersection_with_arc(*this);
+    return other.intersection_with_arc(*this, true);
 }
 
-vec2d arc_segment::intersection_with_line(const line_segment& first) const {
-    // Implement logic to find intersection with a line segment
-    return vec2d(0, 0); // Placeholder
+vec2d arc_segment::intersection_with_line(const line_segment& line, bool arg_first) const {
+    return line.intersection_with_arc(*this, !arg_first);
 }
 
-vec2d arc_segment::intersection_with_arc(const arc_segment& first) const {
-    // Implement logic to find intersection with another arc segment
-    return vec2d(0, 0); // Placeholder
+vec2d arc_segment::intersection_with_arc(const arc_segment& other, bool arg_first) const {
+    // Find midpoint of solutions
+    vec2d v = other.center - center;
+    float vlen2 = v.dot(v);
+    float vlen = std::sqrt(vlen2);
+    v = v / vlen; // Normalize vector
+    float mp_distance = (pow(radius, 2) - pow(other.radius, 2) + vlen2) / (2 * vlen);
+    vec2d midpoint = center + v * (mp_distance / vlen);
+    float solution_distance = std::sqrt(pow(radius, 2) - pow(mp_distance, 2));
+
+    // Determine the direction of the solution
+    vec2d reference_vector;
+    if (arg_first) {
+        reference_vector = other.end;
+    } else {
+        reference_vector = end;
+    }
+    reference_vector -= center;
+
+    vec2d n;
+    if (v.cross(reference_vector) > 0) {
+        // Solution is counter-clockwise
+        n = rotate_ccw_90(v);
+    }
+    else {
+        // Solution is clockwise
+        n = rotate_cw_90(v);
+    }
+
+    return midpoint + n * solution_distance;
 }
 
 void path::find_intersections() {
-    std::vector<sort_item<float, segment*>> items;
+    // std::vector<sort_item<float, segment*>> items;
 
-    for (auto& seg : segments) {
-        bounding_box box = seg->get_bounding_box();
-        items.push_back({box.min_x, seg});
-        items.push_back({box.max_x, seg});
+    // for (auto& seg : segments) {
+    //     bounding_box box = seg->get_bounding_box();
+    //     items.push_back({box.min_x, seg});
+    //     items.push_back({box.max_x, seg});
+    // }
+}
+
+bool line_segment::on_segment(const vec2d& point) const {
+    // Check if the point is on the line segment
+    vec2d start_to_point = point - start;
+    vec2d end_to_point = point - end;
+    return (start_to_point.dot(vhat) >= 0 && end_to_point.dot(vhat) <= 0);
+}
+
+bool arc_segment::on_segment(const vec2d& point) const {
+    // We assume the point is on the circle
+    // Verify it's an angle on the arc segment
+    vec2d center_to_point = (point - center).normalized();
+    float angle = std::acos(center_to_point.v[0]) * (center_to_point.v[1] >= 0 ? 1 : -1); // Get angle in range [-pi, pi]
+    
+    if (is_clockwise) {
+        if (angle < start_angle) {
+            angle += 2 * M_PI; // Adjust angle to be in range [start_angle, end_angle]
+        }
+        return angle <= end_angle;
     }
+    else {
+        if (angle > start_angle) {
+            angle -= 2 * M_PI; // Adjust angle to be in range [end_angle, start_angle]
+        }
+        return angle >= end_angle;
+    }
+}
+
+bool segment::intersects(const segment& other) const {
+    vec2d intersection_point = intersection(other);
+    return on_segment(intersection_point) && other.on_segment(intersection_point);
+}
+
+path::path() {
+    // Initialize an empty path
+}
+
+static path path::from_compact_array(const std::vector<compact_point> &cp) {
+    // Allocate segments
+    path p = path();
+    p.segments.reserve(cp.size());
+    const compact_point &prev = cp[cp.size() - 1];
+    for (const compact_point &point : cp) {
+        if (prev[2] == 0) {
+            // Line segment
+            p.segments.push_back(line_segment::from_compact_point(prev, point));
+        } else {
+            // Arc segment
+            p.segments.push_back(arc_segment::from_compact_point(prev, point));
+        }
+        prev = point;
+    }
+    return p
+}
+
+std::vector<compact_point> path::to_compact_array() const {
+    std::vector<compact_point> cp = cp();
+    cp.reserve(segments.size());
+    for (const segment* seg : segments) {
+        cp.push_back(seg->to_compact_point());
+    }
+    return cp;
+}
+
+std::vector<vec2d> path::find_intersections() const {
+    std::vector<vec2d> points;
+    // TODO: Implement intersection finding logic
+    return points;
+}
+
+bounding_box arc_segment::get_bounding_box() const {
+    // Return the bounding box of the arc segment
+    return bounding_box(
+        center.v[0] - radius, center.v[0] + radius,
+        center.v[1] - radius, center.v[1] + radius
+    );
 }
