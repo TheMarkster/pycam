@@ -5,7 +5,6 @@ description = "A Python project named pycam"
 authors = [
     {name = "Mark Greene", email = "markdanielgreene@gmail.com"}
 ]
-license = "MIT"
 readme = "README.md"
 
 [build-system]

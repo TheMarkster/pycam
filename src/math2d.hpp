@@ -204,10 +204,6 @@ inline mat2d rotation_matrix_cw(float angle) {
     return mat2d(cos_a, sin_a, -sin_a, cos_a);
 }
 
-float angle(const vec2d& a, const vec2d& b) {
-    return angle_norm(a.normalized(), b.normalized());
-}
-
 float angle_norm(const vec2d& a, const vec2d& b) {
     // Both vectors are already normalized
     float angle = std::acos(a.dot(b));
@@ -219,16 +215,20 @@ float angle_norm(const vec2d& a, const vec2d& b) {
     }
 }
 
-float angle(const vec2d& a) {
-    return angle_norm(a.normalized());
+float angle(const vec2d& a, const vec2d& b) {
+    return angle_norm(a.normalized(), b.normalized());
 }
 
 float angle_norm(const vec2d& a) {
-    float angle = std::acos(a[0]);
-    if (a[1] > 0) {
+    float angle = std::acos(a.v[0]);
+    if (a.v[1] > 0) {
         return angle;
     }
     else {
         return -angle;
     }
+}
+
+float angle(const vec2d& a) {
+    return angle_norm(a.normalized());
 }

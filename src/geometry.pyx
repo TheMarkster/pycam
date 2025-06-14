@@ -3,14 +3,14 @@ from libcpp.vector cimport vector
 from libc.stdlib cimport malloc, free
 import numpy as np
 cimport numpy as cnp
+from cpython.pycapsule cimport PyCapsule_New, PyCapsule_Destructor
 
 from geometry cimport (
     vec2d, mat2d,
     line_segment, arc_segment, segment,
     bounding_box, path,
     rotate_ccw_90, rotate_cw_90, rotate_ccw, rotate_cw,
-    rotation_matrix_ccw, rotation_matrix_cw, compact_path,
-    compact_point
+    rotation_matrix_ccw, rotation_matrix_cw, compact_point
 )
 
 cdef class Vec2D:
@@ -123,11 +123,14 @@ cdef class ArcSegment(Segment):
         self.cpp_seg = new arc_segment(center.cpp_v[0], radius, start_angle, end_angle, clockwise)
         self.owner = True
     
-    property start:
-        def __get__(self):
-            v = Vec2D(self.cpp_seg.start.v[0], self.cpp_seg.start.v[1])
-            return v
-        def __set__(self, Vec2D value): self.cpp_seg.start = value.cpp_v[0]
+    @property
+    def start(self):
+        v = Vec2D(self.cpp_seg.start.v[0], self.cpp_seg.start.v[1])
+        return v
+
+    @start.setter
+    def start(self, value: Vec2D):
+        self.cpp_seg.start = value.cpp_v[0]
 
     def __dealloc__(self):
         if self.owner:
@@ -147,33 +150,58 @@ cdef class Path:
         self.cpp_path.find_intersections()
 
     @staticmethod
-    def from_compact_array(np.ndarray[float32_t, ndim=2] arr):
+    def from_compact_array(cnp.ndarray[cnp.float32_t, ndim=2] arr):
         if arr.shape[1] != 3:
             raise ValueError("Array must have shape (N, 3)")
 
-        cdef vector[compact_point] cp
-        cdef compact_point pt
-        for i in range(arr.shape[0]):
-            pt.x1 = arr[i, 0]
-            pt.y1 = arr[i, 1]
-            pt.x2 = arr[i, 2]
-            cp.push_back(pt)
+        cdef size_t n = arr.shape[0]
+        cdef vector[compact_point] vec
+        vec.reserve(n)
 
+        cdef int i
+        cdef compact_point pt
+        for i in range(n):
+            pt[0] = arr[i, 0]
+            pt[1] = arr[i, 1]
+            pt[2] = arr[i, 2]
+            vec.push_back(pt)
+        
         cdef Path p = Path.__new__(Path)
-        p.cpp_path = new path(path.from_compact_array(cp))
+        cdef path *cpp_path = path.from_compact_array(vec)
+        p.cpp_path = cpp_path
         return p
 
     def to_compact_array(self):
         cdef vector[compact_point] cp = self.cpp_path.to_compact_array()
-        cdef float* data = (float*)&cp[0]
-        cdef np.ndarray[float32_t, ndim=2] arr = np.empty((n, 4), dtype=np.float32)
-        cdef Py_ssize_t n = cp.size()
+        cdef np_arr = vector_to_numpy_compact_point(cp)
 
-        arr = np.frombuffer(
-            <cnp.float32_t*> data,
-            dtpye=np.float32,
-            count=n*3
-        )
-        arr.base = data
+        return np_arr
 
-        return arr
+cdef vector_to_numpy_double(vector[double] v):
+    """Convert a C++ vector of doubles to a NumPy array."""
+    cdef cnp.ndarray[cnp.double_t, ndim=1] arr = np.empty(len(v), dtype=np.double)
+    cdef int i
+    for i in range(len(v)):
+        arr[i] = v[i]
+    return arr
+
+cdef vector_to_numpy_float(vector[float] v):
+    """Convert a C++ vector of floats to a NumPy array."""
+    cdef cnp.ndarray[cnp.float_t, ndim=1] arr = np.empty(len(v), dtype=np.float32)
+    cdef int i
+    for i in range(len(v)):
+        arr[i] = v[i]
+    return arr
+
+cdef vector_to_numpy_compact_point(vector[compact_point] v):
+    """Convert a C++ vector of compact_point to a NumPy array."""
+    cdef size_t n = v.size()
+    cdef cnp.ndarray[cnp.float32_t, ndim=2] arr = np.empty((n, 3), dtype=np.float32)
+    cdef int i
+    cdef compact_point pt
+    for i in range(n):
+        pt = v[i]
+        arr[i, 0] = pt[0]
+        arr[i, 1] = pt[1]
+        arr[i, 2] = pt[2]
+    return arr

@@ -1,15 +1,13 @@
 # distutils: language = c++
 from libcpp.vector cimport vector
+from libcpp.span cimport span
 from libc.math cimport sinf, cosf, sqrtf
 from libc.float cimport FLT_MAX
 from libcpp cimport bool
-from libcpp.array cimport array
-
-ctypedef array[float, 3] compact_point
 
 cdef extern from "math2d.hpp" namespace "":
     cdef cppclass vec2d:
-        float v[2]
+        float[2] v
         vec2d()
         vec2d(float x, float y)
         vec2d operator+(const vec2d& rhs) const
@@ -25,7 +23,7 @@ cdef extern from "math2d.hpp" namespace "":
         float cross(const vec2d& rhs) const
 
     cdef cppclass mat2d:
-        float m[2][2]
+        float[2][2] m
         mat2d()
         mat2d(float a, float b, float c, float d)
         @staticmethod
@@ -60,8 +58,9 @@ cdef extern from "math2d.hpp" namespace "":
 
 
 cdef extern from "geom.hpp" namespace "":
-    cdef cppclass compact_path:
-        vector<compact_point> points
+    cdef cppclass compact_point:
+        float[3] data
+        float& operator[](size_t i)
 
     cdef cppclass bounding_box:
         float xmin
@@ -132,6 +131,10 @@ cdef extern from "geom.hpp" namespace "":
         path offset(float distance, bool arc_join)
 
         @staticmethod
-        path from_compact_array(compact_path& cp)
-        vector<compact_point> to_compact_array() const
-        vector<vec2d> find_intersections()
+        path* from_compact_array(const vector[compact_point] &cp)
+        vector[compact_point] to_compact_array() const
+        vector[vec2d] find_intersections()
+    
+cdef vector_to_numpy_double(vector[double] v)
+cdef vector_to_numpy_float(vector[float] v)
+cdef vector_to_numpy_compact_point(vector[compact_point] v)

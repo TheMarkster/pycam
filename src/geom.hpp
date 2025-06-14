@@ -2,13 +2,19 @@
 #define GEOMETRY_H
 
 #include <vector>
+#include <array>
 #include "math2d.hpp"
 
-typedef std::array<float, 3> compact_point;
+struct compact_point {
+    float v[3]; // x, y, bulge
 
-struct compact_path {
-    std::vector<compact_point> points; // Each segment is represented as {x1, y1, x2, y2}
-}
+    compact_point(float x, float y, float bulge) {
+        v[0] = x; v[1] = y; v[2] = bulge;
+    }
+    compact_point() : v{0, 0, 0} {}
+    float& operator[](size_t i) { return v[i]; }
+    const float& operator[](size_t i) const { return v[i]; }
+};
 
 struct bounding_box {
     float xmin;
@@ -73,8 +79,8 @@ public:
 public:
     line_segment(const vec2d& start, const vec2d& end);
 
-    static line_segment from_compact_point(const compact_point& p0, const compact_point& p1) {
-        return line_segment(vec2d(p0[0], p0[1]), vec2d(p1[0], p1[1]));
+    static line_segment* from_compact_point(const compact_point& p0, const compact_point& p1) {
+        return new line_segment(vec2d(p0[0], p0[1]), vec2d(p1[0], p1[1]));
     }
 
     compact_point to_compact_point() const override {
@@ -115,14 +121,12 @@ public:
 
 public:
     arc_segment(const vec2d& center, float radius, float start_angle, float end_angle, bool is_clockwise);
-    arc_segment(const vec2d& center, float radius, const vec2d &start, const vec2d &end, bool is_clockwise);
 
-    static arc_segment from_compact_point(const compact_point& p0, const compact_point& p1)
+    static arc_segment* from_compact_point(const compact_point& p0, const compact_point& p1);
 
-    compact_point to_compact_point() const override {
-        return {start.v[0], start.v[1], bulge()};
-    }
-    float bulge() const { return std::tan((end_angle - start_angle) / 4.0f); }
+    float bulge() const { return std::tan((end_angle - start_angle) / 4.0f); };
+    compact_point to_compact_point() const override { return {start.v[0], start.v[1], bulge()}; };
+    
 
     void offset(float distance) override;
     bounding_box get_bounding_box() const override {
@@ -130,8 +134,7 @@ public:
             center.v[0] - radius, center.v[0] + radius,
             center.v[1] - radius, center.v[1] + radius
         );
-    }
-    std::vector<vec2d> path::find_intersections() const override;
+    };
 
     bool diverges(const segment& other, float direction) const override;
     bool diverges_from_line(const line_segment& line, float direction) const override;
@@ -169,11 +172,11 @@ public:
         }
     }
 
-    path offset(float distance, bool arc_join);
+    path* offset(float distance, bool arc_join);
 
-    static path from_compact_array(compact_path& cp);
+    static path* from_compact_array(const std::vector<compact_point> &cp);
     std::vector<compact_point> to_compact_array() const;
-    std::vector<vec2d> find_intersections();
+    std::vector<compact_point> find_intersections();
 };
 
 #endif

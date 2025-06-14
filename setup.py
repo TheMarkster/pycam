@@ -1,5 +1,6 @@
 from setuptools import setup, Extension
 from Cython.Build import cythonize
+import numpy
 import os
 
 SRC_DIR = "src"
@@ -11,9 +12,9 @@ extensions = [
             os.path.join(SRC_DIR, "geometry.pyx"),
             os.path.join(SRC_DIR, "geom.cpp")
         ],
-        include_dirs=[SRC_DIR],
+        include_dirs=[SRC_DIR, numpy.get_include()],
         language="c++",
-        extra_compile_args=["-std=c++17"],
+        extra_compile_args=["/std:c++20"],
     )
 ]
 

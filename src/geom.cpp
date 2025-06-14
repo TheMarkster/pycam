@@ -2,6 +2,9 @@
 #include "math2d.hpp"
 #include "sorting.hpp"
 #include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 bool bounding_box::intersects(const bounding_box &other) const {
     float _xmin = std::max(other.xmin, xmin);
@@ -103,21 +106,22 @@ arc_segment::arc_segment(const vec2d& center, float radius, float start_angle, f
     end = center + nhat_end * radius;
 }
 
-static arc_segment arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
+arc_segment* arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
         vec2d start = vec2d(p0[0], p0[1]);
         vec2d end = vec2d(p1[0], p1[1]);
         vec2d diff = (start - end)/2;
         float d = diff.length();
-        vec2d center = start + diff
+        vec2d center = start + diff;
         float delta_angle = std::atan(p0[2])*4.0f; // Convert bulge to angle
         float r = d / std::sin(delta_angle / 2.0f);
+        vec2d nhat;
         if (r > 0) {
-            vec2d nhat = rotate_cw_90(diff.normalized());
+            nhat = rotate_cw_90(diff.normalized());
         }
         else {
-            vec2d nhat = rotate_ccw_90(diff.normalized());
+            nhat = rotate_ccw_90(diff.normalized());
         }
-        vec2d center = center + nhat * std::sqrt(r * r - d * d);
+        vec2d mp = center + nhat * std::sqrt(r * r - d * d);
         float start_angle = angle(start);
         float end_angle = angle(end);
         if (r > 0) {
@@ -125,14 +129,14 @@ static arc_segment arc_segment::from_compact_point(const compact_point& p0, cons
             if (end_angle > start_angle) {
                 end_angle -= 2 * M_PI; // Adjust for clockwise direction
             }
-            return arc_segment(center, r, start, end, true);
+            return new arc_segment(mp, r, start_angle, end_angle, true);
         }
         else {
             // Counter-clockwise arc; angle increases from start to end
             if (end_angle < start_angle) {
                 end_angle += 2 * M_PI; // Adjust for counter-clockwise direction
             }
-            return arc_segment(center, r, start, end, false);
+            return new arc_segment(mp, r, start_angle, end_angle, false);
         }
     }
 
@@ -198,16 +202,6 @@ vec2d arc_segment::intersection_with_arc(const arc_segment& other, bool arg_firs
     return midpoint + n * solution_distance;
 }
 
-void path::find_intersections() {
-    // std::vector<sort_item<float, segment*>> items;
-
-    // for (auto& seg : segments) {
-    //     bounding_box box = seg->get_bounding_box();
-    //     items.push_back({box.min_x, seg});
-    //     items.push_back({box.max_x, seg});
-    // }
-}
-
 bool line_segment::on_segment(const vec2d& point) const {
     // Check if the point is on the line segment
     vec2d start_to_point = point - start;
@@ -240,47 +234,48 @@ bool segment::intersects(const segment& other) const {
     return on_segment(intersection_point) && other.on_segment(intersection_point);
 }
 
-path::path() {
-    // Initialize an empty path
-}
-
-static path path::from_compact_array(const std::vector<compact_point> &cp) {
+path* path::from_compact_array(const std::vector<compact_point> &data) {
     // Allocate segments
-    path p = path();
-    p.segments.reserve(cp.size());
-    const compact_point &prev = cp[cp.size() - 1];
-    for (const compact_point &point : cp) {
+    path *p = new path();
+    size_t n = data.size();
+    p->segments.reserve(n);
+    compact_point prev = data[n-1];
+
+    size_t i;
+    compact_point point;
+    for (i=0; i<data.size(); i++) {
+        point = data[i];
         if (prev[2] == 0) {
             // Line segment
-            p.segments.push_back(line_segment::from_compact_point(prev, point));
+            p->segments.push_back(line_segment::from_compact_point(prev, point));
         } else {
             // Arc segment
-            p.segments.push_back(arc_segment::from_compact_point(prev, point));
+            p->segments.push_back(arc_segment::from_compact_point(prev, point));
         }
         prev = point;
     }
-    return p
+    return p;
 }
 
 std::vector<compact_point> path::to_compact_array() const {
-    std::vector<compact_point> cp = cp();
-    cp.reserve(segments.size());
-    for (const segment* seg : segments) {
-        cp.push_back(seg->to_compact_point());
+    std::vector<compact_point> data;
+    size_t i = 0;
+    for (i=0; i<segments.size(); i++) {
+        data.push_back(segments[i]->to_compact_point());
     }
-    return cp;
+    return data;
 }
 
-std::vector<vec2d> path::find_intersections() const {
-    std::vector<vec2d> points;
-    // TODO: Implement intersection finding logic
+std::vector<compact_point> path::find_intersections() {
+    // std::vector<vec2d> points;
+    // // TODO: Implement intersection finding logic
+    // compact_point *data = 
+    // std::span<compact_point> result;
+    // result.data = new compact_point[points.size()];
+    // result.size = points.size();
+    // for (size_t i = 0; i < points.size(); i++) {
+    //     result.data[i] = {points[i].v[0], points[i].v[1], 0}; // Bulge is set to 0 for intersections
+    // }
+    std::vector<compact_point> points;
     return points;
-}
-
-bounding_box arc_segment::get_bounding_box() const {
-    // Return the bounding box of the arc segment
-    return bounding_box(
-        center.v[0] - radius, center.v[0] + radius,
-        center.v[1] - radius, center.v[1] + radius
-    );
 }
