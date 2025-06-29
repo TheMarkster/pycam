@@ -4,6 +4,7 @@
 #include <vector>
 #include <array>
 #include "math2d.hpp"
+#include "pycam.hpp"
 
 struct compact_point {
     float v[3]; // x, y, bulge
@@ -16,35 +17,16 @@ struct compact_point {
     const float& operator[](size_t i) const { return v[i]; }
 };
 
-struct bounding_box {
-    float xmin;
-    float xmax;
-    float ymin;
-    float ymax;
-
-    bounding_box(float xmin, float xmax, float ymin, float ymax)
-        : xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax) {}
-    bounding_box() : xmin(0), xmax(0), ymin(0), ymax(0) {}
-    bool intersects(const bounding_box &other) const;
-    void expand(float x, float y) {
-        xmin -= x;
-        xmax += x;
-        ymin -= y;
-        ymax += y;
-    }
-    void translate(float x, float y) {
-        xmin += x;
-        xmax += x;
-        ymin += y;
-        ymax += y;
-    }
-};
 
 class line_segment;
 class arc_segment;
 
 class segment {
 public:
+    friend class line_segment;
+    friend class arc_segment;
+    friend class path;
+
     vec2d start;
     vec2d end;
 
@@ -53,7 +35,12 @@ public:
     segment() {};
     segment(const vec2d& start, const vec2d& end) : start(start), end(end) {}
 
-    virtual void offset(float distance) = 0;
+    virtual segment* clone() const = 0;
+
+    virtual vec2d get_nhat_start() const = 0;
+    virtual vec2d get_nhat_end() const = 0;
+
+    virtual bool offset(float distance) = 0;
     virtual bounding_box get_bounding_box() const = 0;
 
     virtual compact_point to_compact_point() const = 0;
@@ -66,8 +53,12 @@ public:
     virtual vec2d intersection_with_line(const line_segment& line, bool arg_first) const = 0;
     virtual vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const = 0;
     
+    result<vec2d> intersects(const segment &other) const;
+
+protected:
+    virtual bool set_start_point(const vec2d& point) = 0;
+    virtual bool set_end_point(const vec2d& point) = 0;
     virtual bool on_segment(const vec2d& point) const = 0;
-    bool intersects(const segment& other) const;
 };
 
 class line_segment : public segment {
@@ -79,6 +70,13 @@ public:
 public:
     line_segment(const vec2d& start, const vec2d& end);
 
+    vec2d get_nhat_start() const { return nhat; }
+    vec2d get_nhat_end() const { return nhat; }
+
+    segment* clone() const override {
+        return new line_segment(start, end);
+    }
+
     static line_segment* from_compact_point(const compact_point& p0, const compact_point& p1) {
         return new line_segment(vec2d(p0[0], p0[1]), vec2d(p1[0], p1[1]));
     }
@@ -87,7 +85,7 @@ public:
         return {start.v[0], start.v[1], 0};
     }
 
-    void offset(float distance) override;
+    bool offset(float distance) override;
     bounding_box get_bounding_box() const override {
         return bounding_box(
             std::min(start.v[0], end.v[0]),
@@ -105,11 +103,19 @@ public:
     vec2d intersection_with_line(const line_segment& other, bool arg_first) const override;
     vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const override;
 
-private:
+protected:
+    bool set_start_point(const vec2d& point) override;
+    bool set_end_point(const vec2d& point) override;
+
     bool on_segment(const vec2d& point) const override;
 };
 
 class arc_segment : public segment {
+protected:
+    arc_segment() = default;
+    arc_segment(const vec2d& start, const vec2d& end, const vec2d& center, const vec2d& nhat_start, const vec2d& nhat_end, float radius, float start_angle, float end_angle)
+        : segment(start, end), center(center), nhat_start(nhat_start), nhat_end(nhat_end), radius(radius), start_angle(start_angle), end_angle(end_angle) {}
+
 public:
     vec2d center;
     vec2d nhat_start;
@@ -117,18 +123,30 @@ public:
     float radius;
     float start_angle;
     float end_angle;
-    bool is_clockwise;
 
-public:
-    arc_segment(const vec2d& center, float radius, float start_angle, float end_angle, bool is_clockwise);
+public:    
+    vec2d get_nhat_start() const { return nhat_start; }
+    vec2d get_nhat_end() const { return nhat_end; }
 
     static arc_segment* from_compact_point(const compact_point& p0, const compact_point& p1);
+    static arc_segment* arc1(const vec2d & center, const vec2d & point, float angle);
+    static arc_segment* arc2(const vec2d & point1, const vec2d & point2, float radius, bool is_clockwise); // Three point arc segment
+    static arc_segment* arc3(const vec2d & point1, const vec2d & point2, float angle);
+    static arc_segment* arc4(const vec2d & point1, const vec2d & point2, float bulge);
+    static arc_segment* arc5(const vec2d & point1, const vec2d & point2, const vec2d & point3);
+
+    bool is_clockwise() const { return radius > 0 ? end_angle < start_angle : end_angle > start_angle; }
+
+    segment* clone() const override {
+        arc_segment *temp = new arc_segment(start, end, center, nhat_start, nhat_end, radius, start_angle, end_angle);
+        return temp;
+    }
 
     float bulge() const { return std::tan((end_angle - start_angle) / 4.0f); };
     compact_point to_compact_point() const override { return {start.v[0], start.v[1], bulge()}; };
     
 
-    void offset(float distance) override;
+    bool offset(float distance) override;
     bounding_box get_bounding_box() const override {
         return bounding_box(
             center.v[0] - radius, center.v[0] + radius,
@@ -144,7 +162,10 @@ public:
     vec2d intersection_with_line(const line_segment& line, bool arg_first) const override;
     vec2d intersection_with_arc(const arc_segment& other, bool arg_first) const override;
 
-private:
+protected:
+    bool set_start_point(const vec2d& point) override;
+    bool set_end_point(const vec2d& point) override;
+
     bool on_segment(const vec2d& point) const override;
 };
 
@@ -154,11 +175,18 @@ struct bb_index {
     bool start;
 };
 
+
 class path {
-    std::vector<segment*> segments;
 
 public:
+    std::vector<segment*> segments;
+    
     path() = default;
+    ~path() {
+        for (auto seg : segments) {
+            delete seg;
+        }
+    }
 
     void add_segment(segment* seg) {
         segments.push_back(seg);
@@ -174,9 +202,15 @@ public:
 
     path* offset(float distance, bool arc_join);
 
-    static path* from_compact_array(const std::vector<compact_point> &cp);
+    static path* from_compact_array(const std::vector<compact_point> &cp, bool c);
     std::vector<compact_point> to_compact_array() const;
-    std::vector<compact_point> find_intersections();
 };
+
+inline line_segment* as_line(segment* seg) {
+    return dynamic_cast<line_segment*>(seg);
+}
+inline arc_segment* as_arc(segment* seg) {
+    return dynamic_cast<arc_segment*>(seg);
+}
 
 #endif

@@ -2,34 +2,24 @@
 #include "math2d.hpp"
 #include "sorting.hpp"
 #include <cmath>
+#include <algorithm>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-bool bounding_box::intersects(const bounding_box &other) const {
-    float _xmin = std::max(other.xmin, xmin);
-    float _xmax = std::min(other.xmax, xmax);
-    if (_xmin >= _xmax) return false; // No intersection in x-axis
-
-    float _ymin = std::max(other.ymin, ymin);
-    float _ymax = std::min(other.ymax, ymax);
-    if (_ymin >= _ymax) return false; // No intersection in y-axis
-
-    return true;
-}
-
 line_segment::line_segment(const vec2d& start, const vec2d& end)
     : segment(start, end) {
     vhat = (end - start).normalized();
-    nhat = rotate_ccw_90(vhat); // Perpendicular vector
+    nhat = rotate_cw_90(vhat); // Perpendicular vector
     s = nhat.dot(start);
 }
 
-void line_segment::offset(float distance) {
+bool line_segment::offset(float distance) {
     vec2d offset_vector = nhat * distance;
-    start += offset_vector;
-    end += offset_vector;
+    start = start + offset_vector;
+    end = end + offset_vector;
     s += distance;
+    return true;
 }
 
 bool line_segment::diverges(const segment& other, float distance) const {
@@ -39,6 +29,10 @@ bool line_segment::diverges(const segment& other, float distance) const {
 
 bool line_segment::diverges_from_line(const line_segment& first, float direction) const {
     float cross = first.vhat.cross(vhat) * direction;
+    if (std::abs(cross) < 1e-6) {
+        // Parallel lines, check if they are collinear
+        return false;
+    }
     return cross < 0;
 }
 
@@ -98,52 +92,21 @@ vec2d line_segment::intersection_with_arc(const arc_segment& arc, bool arc_first
     }
 }
 
-arc_segment::arc_segment(const vec2d& center, float radius, float start_angle, float end_angle, bool is_clockwise) : 
-    center(center), radius(radius), start_angle(start_angle), end_angle(end_angle), is_clockwise(is_clockwise) {
-    nhat_start = vec2d(std::cos(start_angle), std::sin(start_angle));
-    nhat_end = vec2d(std::cos(end_angle), std::sin(end_angle));
-    start = center + nhat_start * radius;
-    end = center + nhat_end * radius;
+arc_segment* arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
+    vec2d start = vec2d(p0[0], p0[1]);
+    vec2d end = vec2d(p1[0], p1[1]);
+    return arc_segment::arc4(start, end, p0[2]);
 }
 
-arc_segment* arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
-        vec2d start = vec2d(p0[0], p0[1]);
-        vec2d end = vec2d(p1[0], p1[1]);
-        vec2d diff = (start - end)/2;
-        float d = diff.length();
-        vec2d center = start + diff;
-        float delta_angle = std::atan(p0[2])*4.0f; // Convert bulge to angle
-        float r = d / std::sin(delta_angle / 2.0f);
-        vec2d nhat;
-        if (r > 0) {
-            nhat = rotate_cw_90(diff.normalized());
-        }
-        else {
-            nhat = rotate_ccw_90(diff.normalized());
-        }
-        vec2d mp = center + nhat * std::sqrt(r * r - d * d);
-        float start_angle = angle(start);
-        float end_angle = angle(end);
-        if (r > 0) {
-            // Clockwise arc; angle decrease from start to end
-            if (end_angle > start_angle) {
-                end_angle -= 2 * M_PI; // Adjust for clockwise direction
-            }
-            return new arc_segment(mp, r, start_angle, end_angle, true);
-        }
-        else {
-            // Counter-clockwise arc; angle increases from start to end
-            if (end_angle < start_angle) {
-                end_angle += 2 * M_PI; // Adjust for counter-clockwise direction
-            }
-            return new arc_segment(mp, r, start_angle, end_angle, false);
-        }
+bool arc_segment::offset(float distance) {
+    float temp = radius + distance;
+    if (temp * radius < 0) {
+        return false;
     }
-
-void arc_segment::offset(float distance) {
-    radius += distance;
+    radius = temp;
     start = center + nhat_start * radius;
     end = center + nhat_end * radius;
+    return true;
 }
 
 bool arc_segment::diverges(const segment& other, float direction) const {
@@ -153,11 +116,21 @@ bool arc_segment::diverges(const segment& other, float direction) const {
 
 bool arc_segment::diverges_from_line(const line_segment& first, float direction) const {
     // Check if the arc diverges from a line segment
+    float cross = first.nhat.cross(nhat_start) * direction;
+    if (std::abs(cross) < 1e-6) {
+        // Parallel lines, check if they are collinear
+        return false;
+    }
     return first.nhat.cross(nhat_start) * direction * radius < 0;
 }
 
 bool arc_segment::diverges_from_arc(const arc_segment& first, float direction) const {
     // Check if the arc diverges from another arc segment
+    float cross = first.nhat_end.cross(nhat_start) * direction;
+    if (std::abs(cross) < 1e-6) {
+        // Parallel arcs, check if they are collinear
+        return false;
+    }
     return first.nhat_end.cross(nhat_start) * direction * first.radius * radius < 0;
 }
 
@@ -215,35 +188,36 @@ bool arc_segment::on_segment(const vec2d& point) const {
     vec2d center_to_point = (point - center).normalized();
     float angle = std::acos(center_to_point.v[0]) * (center_to_point.v[1] >= 0 ? 1 : -1); // Get angle in range [-pi, pi]
     
-    if (is_clockwise) {
-        if (angle < start_angle) {
-            angle += 2 * M_PI; // Adjust angle to be in range [start_angle, end_angle]
-        }
-        return angle <= end_angle;
-    }
-    else {
+    if (is_clockwise()) { // clockwise arc
         if (angle > start_angle) {
-            angle -= 2 * M_PI; // Adjust angle to be in range [end_angle, start_angle]
+            angle -= 2 * M_PI; // Adjust angle to be in range [start_angle, end_angle]
         }
         return angle >= end_angle;
     }
+    else {
+        if (angle < start_angle) {
+            angle += 2 * M_PI; // Adjust angle to be in range [end_angle, start_angle]
+        }
+        return angle <= end_angle;
+    }
 }
 
-bool segment::intersects(const segment& other) const {
+result<vec2d> segment::intersects(const segment& other) const {
     vec2d intersection_point = intersection(other);
-    return on_segment(intersection_point) && other.on_segment(intersection_point);
+    bool success = on_segment(intersection_point) && other.on_segment(intersection_point);
+    return result<vec2d>{intersection_point, success};
 }
 
-path* path::from_compact_array(const std::vector<compact_point> &data) {
+path* path::from_compact_array(const std::vector<compact_point> &data, bool close) {
     // Allocate segments
     path *p = new path();
     size_t n = data.size();
     p->segments.reserve(n);
-    compact_point prev = data[n-1];
+    compact_point prev = data[0];
 
     size_t i;
     compact_point point;
-    for (i=0; i<data.size(); i++) {
+    for (i=1; i<data.size(); i++) {
         point = data[i];
         if (prev[2] == 0) {
             // Line segment
@@ -253,6 +227,17 @@ path* path::from_compact_array(const std::vector<compact_point> &data) {
             p->segments.push_back(arc_segment::from_compact_point(prev, point));
         }
         prev = point;
+    }
+
+    if (close) {
+        point = data[0];
+        if (prev[2] == 0) {
+            // Line segment
+            p->segments.push_back(line_segment::from_compact_point(prev, point));
+        } else {
+            // Arc segment
+            p->segments.push_back(arc_segment::from_compact_point(prev, point));
+        }
     }
     return p;
 }
@@ -266,16 +251,354 @@ std::vector<compact_point> path::to_compact_array() const {
     return data;
 }
 
-std::vector<compact_point> path::find_intersections() {
-    // std::vector<vec2d> points;
-    // // TODO: Implement intersection finding logic
-    // compact_point *data = 
-    // std::span<compact_point> result;
-    // result.data = new compact_point[points.size()];
-    // result.size = points.size();
-    // for (size_t i = 0; i < points.size(); i++) {
-    //     result.data[i] = {points[i].v[0], points[i].v[1], 0}; // Bulge is set to 0 for intersections
-    // }
-    std::vector<compact_point> points;
-    return points;
+path* path::offset(float distance, bool arc_join) {
+    // Create a new path for the offset segments
+    path *offset_path = new path();
+    segment *prev = NULL;
+    segment *offset_segment = NULL;
+    segment *temp = NULL;
+    bool success;
+
+    prev = segments[segments.size() - 1]->clone();
+    prev->offset(distance);
+
+    segment *top;
+    vec2d intersection;
+    for (segment* seg : segments) {
+        offset_segment = seg->clone();
+        success = offset_segment->offset(distance);
+
+        if (!success) {
+            delete offset_segment;
+            continue;
+        }
+
+        if (seg->diverges(*prev, distance)) {
+            if (arc_join) {
+                temp = arc_segment::arc1(seg->start, prev->end, angle(prev->get_nhat_end(), offset_segment->get_nhat_start()));
+                if (temp != NULL) {
+                    offset_path->add_segment(temp);
+                }
+            }
+            else {
+                temp = new line_segment(prev->end, offset_segment->start);
+
+                if (temp != NULL) {
+                    offset_path->add_segment(temp);
+                }
+            }
+            offset_path->add_segment(offset_segment);
+            prev = offset_segment;
+        }
+        else {
+            while (true) {
+                if (offset_path->segments.empty()) {
+                    // No segments in the offset path, add the first segment
+                    offset_path->add_segment(offset_segment);
+                    prev = offset_segment;
+                    break;
+                }
+                
+                top = offset_path->segments[offset_path->segments.size() - 1];
+                intersection = offset_segment->intersection(*top);
+
+                if (!top->set_end_point(intersection)) {
+                    offset_path->segments.pop_back();
+                    delete top;
+                }
+                else {
+                    if (offset_segment->set_start_point(intersection)) {
+                        // The segment is now valid
+                        offset_path->add_segment(offset_segment);
+                        prev = offset_segment;
+                        break;
+                    }
+                    else {
+                        // The segment is not valid, remove it
+                        delete offset_segment;
+                        prev = top;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Intersect first and last segments
+    while (true) {
+        if (offset_path->segments.size() < 3) {
+            break;
+        }
+        
+        top = offset_path->segments[0];
+        prev = offset_path->segments[offset_path->segments.size() - 1];
+        intersection = prev->intersection(*top);
+
+        if (prev->set_end_point(intersection)) {
+            if (top->set_start_point(intersection)) {
+                break;
+            }
+            else {
+                // The segment is not valid, remove it
+                offset_path->segments.pop_back();
+                delete prev;
+            }
+        }
+        else {
+            offset_path->segments.erase(offset_path->segments.begin());
+            delete top;
+        }
+    }
+
+    if (offset_path->segments.size() < 3) {
+        // Need at least 3 segments to form a closed path
+        while (!offset_path->segments.empty()) {
+            delete offset_path->segments.back();
+            offset_path->segments.pop_back();
+        }
+    }
+
+    return offset_path;
+}
+
+arc_segment* arc_segment::arc1(const vec2d & center, const vec2d & point, float angle) {
+    arc_segment *seg = new arc_segment();
+
+    vec2d rvec = point - center;
+    seg->radius = rvec.length();
+    rvec = rvec.normalized();
+
+    seg->start = point;
+    seg->center = center;
+    seg->start_angle = angle_norm(rvec);
+    seg->end_angle = seg->start_angle + angle;
+    seg->nhat_start = rvec;
+    seg->nhat_end = vec2d(std::cos(seg->end_angle), std::sin(seg->end_angle));
+    seg->end = center + seg->nhat_end * seg->radius;
+
+    return seg;
+}
+
+arc_segment* arc_segment::arc2(const vec2d & point1, const vec2d & point2, float radius, bool is_clockwise) {
+    vec2d midpoint = (point1 + point2) / 2;
+    vec2d v21 = (point2 - point1);
+    float off = radius * radius - v21.dot(v21);
+    v21 = v21.normalized();
+    
+    vec2d center;
+    if (std::abs(off) < 1e-6) {
+        center = midpoint;
+    }
+    else if (off < 0) {
+        // No valid arc can be formed
+        return nullptr; // or throw an exception
+    }
+    else {
+        off = std::sqrt(off);
+        if (is_clockwise) {
+            center = midpoint + rotate_cw_90(v21) * off;
+        } else {
+            center = midpoint + rotate_ccw_90(v21) * off;
+        }
+    }
+    
+    vec2d v1 = point1 - center;
+    vec2d v2 = point2 - center;
+
+    arc_segment *seg = new arc_segment();
+    seg->radius = v1.length();
+    v1 = v1.normalized();
+    v2 = v2.normalized();
+
+    seg->start = point1;
+    seg->end = point2;
+    seg->center = center;
+    seg->start_angle = angle_norm(v1);
+    seg->end_angle = angle_norm(v2);
+
+    if (is_clockwise) {
+        // Adjust angles for clockwise direction
+        if (seg->end_angle > seg->start_angle) {
+            seg->end_angle -= 2 * M_PI; // Adjust for clockwise direction
+        }
+    } else {
+        // Adjust angles for counter-clockwise direction
+        if (seg->end_angle < seg->start_angle) {
+            seg->end_angle += 2 * M_PI; // Adjust for counter-clockwise direction
+        }
+    }
+
+    seg->nhat_start = v1;
+    seg->nhat_end = v2;
+    
+    return seg;
+}
+
+arc_segment* arc_segment::arc3(const vec2d & point1, const vec2d & point2, float angle) {
+    arc_segment *seg = new arc_segment();
+
+    vec2d midpoint = (point1 + point2) / 2;
+    vec2d v21 = (point2 - point1);
+    float chord_length2 = v21.length()/2;
+    v21 = v21.normalized();
+
+    // radius * sin(angle / 2) = chord_length / 2
+    float radius = chord_length2 / (std::sin(angle / 2));
+    float offset = std::sqrt(radius * radius - chord_length2 * chord_length2);
+    vec2d center = midpoint + rotate_ccw_90(v21) * offset;
+
+    vec2d v1 = (point1 - center).normalized();
+
+    seg->start = point1;
+    seg->end = point2;
+    seg->center = center;
+    seg->radius = std::abs(radius);
+    seg->start_angle = angle_norm(v1);
+    seg->end_angle = seg->start_angle + angle;
+    seg->nhat_start = v1;
+    seg->nhat_end = vec2d(std::cos(seg->end_angle), std::sin(seg->end_angle));
+
+    return seg;
+}
+
+arc_segment* arc_segment::arc4(const vec2d & point1, const vec2d & point2, float height) {
+    arc_segment *seg = new arc_segment();
+
+    vec2d v21 = point2 - point1;
+    float cl2 = v21.length() / 2;
+    float bulge = height / cl2;
+    vec2d midpoint = (point1 + point2) / 2;
+    float angle = std::atan(bulge)*4.0f; // Convert bulge to angle
+    float radius = cl2 / std::sin(angle / 2.0f);
+    vec2d nhat;
+    if (bulge < 0) { // Clockwise arc
+        nhat = rotate_cw_90(v21.normalized());
+    }
+    else {
+        nhat = rotate_ccw_90(v21.normalized());
+    }
+    vec2d center;
+    if (std::abs(bulge) < 1) {
+        center = midpoint + nhat * std::sqrt(radius * radius - cl2 * cl2);
+    }
+    else {
+        center = midpoint - nhat * std::sqrt(radius * radius - cl2 * cl2);
+    }
+    
+    // vec2d center = midpoint;
+
+    vec2d n1 = (point1 - center).normalized();
+    vec2d n2 = (point2 - center).normalized();
+
+    seg->start = point1;
+    seg->end = point2;
+    seg->center = center;
+    seg->radius = radius;
+    if (radius < 0) {
+        seg->start_angle = -angle_norm(n1);
+        seg->end_angle = seg->start_angle - angle;
+    } else {
+        seg->start_angle = angle_norm(n1);
+        seg->end_angle = seg->start_angle + angle;
+    }
+    seg->nhat_start = n1;
+    seg->nhat_end = n2;
+
+    return seg;
+}
+
+arc_segment* arc_segment::arc5(const vec2d & point1, const vec2d & point2, const vec2d & point3) {
+    arc_segment *seg = new arc_segment();
+
+    vec2d mp21 = (point1 + point2) / 2;
+    vec2d v21 = point2 - point1;
+    vec2d n21 = rotate_ccw_90(v21);
+
+    vec2d mp32 = (point2 + point3) / 2;
+    vec2d v32 = point3 - point2;
+    vec2d n32 = rotate_ccw_90(v32);
+
+    vec2d sol(v21.dot(mp21), v32.dot(mp32));
+
+    vec2d center = solve(mat2d::from_rvec(v21, v32), sol);
+
+    vec2d v31 = point3 - point1;
+    bool is_clockwise = (v21.cross(v31) < 0);
+
+    vec2d n1 = point1 - center;
+    vec2d n3 = point3 - center;
+    seg->radius = n1.length();
+    n1 = n1.normalized();
+    n3 = n3.normalized();
+
+    seg->start = point1;
+    seg->end = point3;
+    seg->center = center;
+    seg->start_angle = angle_norm(n1);
+    seg->end_angle = angle_norm(n3);
+    if (is_clockwise) {
+        // Adjust angles for clockwise direction
+        if (seg->end_angle > seg->start_angle) {
+            seg->end_angle -= 2 * M_PI; // Adjust for clockwise direction
+        }
+    } else {
+        // Adjust angles for counter-clockwise direction
+        if (seg->end_angle < seg->start_angle) {
+            seg->end_angle += 2 * M_PI; // Adjust for counter-clockwise direction
+        }
+    }
+    seg->nhat_start = n1;
+    seg->nhat_end = n3;
+
+    return seg;
+}
+
+bool line_segment::set_end_point(const vec2d& point) {
+    end = point;
+    vec2d delta = end - start;
+    if (delta.dot(vhat) < 0) {
+        // If the new end point is behind the start point, a zero-length segment occurred
+        return false;
+    }
+    return true;
+}
+
+bool line_segment::set_start_point(const vec2d& point) {
+    start = point;
+    vec2d delta = end - start;
+    if (delta.dot(vhat) < 0) {
+        // If the new start point is ahead of the end point, a zero-length segment occurred
+        return false;
+    }
+    return true;
+}
+
+bool arc_segment::set_end_point(const vec2d& point) {
+    float dangle = end_angle - start_angle;
+    end = point;
+    vec2d nhat_new = (point - center).normalized();
+    end_angle += angle_norm(nhat_end, nhat_new);
+    nhat_end = nhat_new;
+    float dangle_new = end_angle - start_angle;
+    if (dangle * dangle_new <= 0) {
+        // Angle inversion implies zero-length arc occurred
+        return false;
+    }
+    else
+        return true;
+}
+
+bool arc_segment::set_start_point(const vec2d& point) {
+    float dangle = end_angle - start_angle;
+    start = point;
+    vec2d nhat_new = (point - center).normalized();
+    start_angle += angle_norm(nhat_start, nhat_new);
+    nhat_start = nhat_new;
+    float dangle_new = end_angle - start_angle;
+    if (dangle * dangle_new < 0) {
+        // Angle inversion implies zero-length arc occurred
+        return false;
+    }
+    else
+        return true;
 }

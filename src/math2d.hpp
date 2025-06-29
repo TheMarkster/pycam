@@ -51,7 +51,7 @@ struct vec2d {
     }
     vec2d normalized() const {
         float len = length();
-        return len != 0 ? *this / len : vec2d(0, 0);
+        return len != 0 ? vec2d(v[0] / len, v[1] / len) : vec2d(0, 0);
     }
     float dot(const vec2d& rhs) const {
         return v[0] * rhs.v[0] + v[1] * rhs.v[1];
@@ -157,6 +157,36 @@ struct mat2d {
     }
 };
 
+struct bounding_box {
+    float xmin;
+    float xmax;
+    float ymin;
+    float ymax;
+
+    bounding_box(float xmin, float xmax, float ymin, float ymax)
+        : xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax) {}
+    bounding_box() : xmin(0), xmax(0), ymin(0), ymax(0) {}
+    bool intersects(const bounding_box &other) const;
+    bool intersects_x(const bounding_box &other) const {
+        return (xmin <= other.xmax && xmax >= other.xmin);
+    }
+    bool intersects_y(const bounding_box &other) const {
+        return (ymin <= other.ymax && ymax >= other.ymin);
+    }
+    void expand(float x, float y) {
+        xmin -= x;
+        xmax += x;
+        ymin -= y;
+        ymax += y;
+    }
+    void translate(float x, float y) {
+        xmin += x;
+        xmax += x;
+        ymin += y;
+        ymax += y;
+    }
+};
+
 inline vec2d solve(const mat2d& m, const vec2d& s) {
     float d = m.determinant();
     if (d == 0) return vec2d(0, 0);
@@ -204,9 +234,10 @@ inline mat2d rotation_matrix_cw(float angle) {
     return mat2d(cos_a, sin_a, -sin_a, cos_a);
 }
 
-float angle_norm(const vec2d& a, const vec2d& b) {
+inline float angle_norm(const vec2d& a, const vec2d& b) {
     // Both vectors are already normalized
-    float angle = std::acos(a.dot(b));
+    float angle = std::max(-1.0f, std::min(1.0f, a.dot(b))); // Clamp to avoid NaN
+    angle = std::acos(angle);
     if (a.cross(b) > 0) {
         return angle;
     }
@@ -215,12 +246,13 @@ float angle_norm(const vec2d& a, const vec2d& b) {
     }
 }
 
-float angle(const vec2d& a, const vec2d& b) {
+inline float angle(const vec2d& a, const vec2d& b) {
     return angle_norm(a.normalized(), b.normalized());
 }
 
-float angle_norm(const vec2d& a) {
-    float angle = std::acos(a.v[0]);
+inline float angle_norm(const vec2d& a) {
+    float angle = std::max(-1.0f, std::min(1.0f, a.v[0])); // Clamp to avoid NaN
+    angle = std::acos(angle);
     if (a.v[1] > 0) {
         return angle;
     }
@@ -229,6 +261,6 @@ float angle_norm(const vec2d& a) {
     }
 }
 
-float angle(const vec2d& a) {
+inline float angle(const vec2d& a) {
     return angle_norm(a.normalized());
 }

@@ -4,6 +4,8 @@ from libc.stdlib cimport malloc, free
 import numpy as np
 cimport numpy as cnp
 from cpython.pycapsule cimport PyCapsule_New, PyCapsule_Destructor
+from typing import List
+
 
 from geometry cimport (
     vec2d, mat2d,
@@ -33,13 +35,21 @@ cdef class Vec2D:
         if isinstance(other, Vec2D):
             return self._add_vec2d(other)
 
-    property x:
-        def __get__(self): return self.cpp_v.v[0]
-        def __set__(self, float value): self.cpp_v.v[0] = value
+    @property
+    def x(self) -> float:
+        return self.cpp_v.v[0]
 
-    property y:
-        def __get__(self): return self.cpp_v.v[1]
-        def __set__(self, float value): self.cpp_v.v[1] = value
+    @x.setter
+    def x(self, value: float):
+        self.cpp_v.v[0] = value
+    
+    @property
+    def y(self) -> float:
+        return self.cpp_v.v[1]
+
+    @y.setter
+    def y(self, value: float):
+        self.cpp_v.v[1] = value
 
     def length(self): return self.cpp_v.length()
     def normalized(self): return Vec2D(self.cpp_v.normalized().v[0], self.cpp_v.normalized().v[1])
@@ -95,6 +105,14 @@ cdef class Segment:
     """Abstract base class. Not instantiable directly."""
     cdef segment* cpp_seg
     cdef bint owner
+
+    @property
+    def start(self) -> Vec2D:
+        return Vec2D(self.cpp_seg.start.v[0], self.cpp_seg.start.v[1])
+
+    @property
+    def end(self) -> Vec2D:
+        return Vec2D(self.cpp_seg.end.v[0], self.cpp_seg.end.v[1])
     
     def get_bounding_box(self):
         cdef bounding_box bb = self.cpp_seg.get_bounding_box()
@@ -105,32 +123,170 @@ cdef class Segment:
         return Vec2D(pt.v[0], pt.v[1])
     
     def intersects(self, Segment other):
-        return self.cpp_seg.intersects(other.cpp_seg[0])
+        cdef result[vec2d] res = self.cpp_seg.intersects(other.cpp_seg[0])
+
+        if res.success:
+            return Vec2D(res.data.v[0], res.data.v[1])
+        else:
+            return None
 
 
 cdef class LineSegment(Segment):
     def __cinit__(self, Vec2D start, Vec2D end):
         self.cpp_seg = new line_segment(start.cpp_v[0], end.cpp_v[0])
-        self.owner = True
 
+    def __dealloc__(self):
+        del self.cpp_seg
+
+    @property
+    def nhat(self) -> Vec2D:
+        cdef line_segment *seg = <line_segment*>self.cpp_seg
+        v = Vec2D(seg.nhat.v[0], seg.nhat.v[1])
+        return v
+    
+    @property
+    def vhat(self) -> Vec2D:
+        cdef line_segment *seg = <line_segment*>self.cpp_seg
+        v = Vec2D(seg.vhat.v[0], seg.vhat.v[1])
+        return v
+    
+    @property
+    def s(self) -> float:
+        cdef line_segment *seg = <line_segment*>self.cpp_seg
+        return seg.s
+    
+    def to_dict(self):
+        """Convert the line segment to a dictionary representation."""
+        cdef line_segment *seg = <line_segment*>self.cpp_seg
+        return {
+            'start': (seg.start.v[0], seg.start.v[1]),
+            'end': (seg.end.v[0], seg.end.v[1]),
+            'nhat': (seg.nhat.v[0], seg.nhat.v[1]),
+            'vhat': (seg.vhat.v[0], seg.vhat.v[1]),
+        }
+        
     def __dealloc__(self):
         if self.owner:
             del self.cpp_seg
 
 
 cdef class ArcSegment(Segment):
-    def __cinit__(self, Vec2D center, float radius, float start_angle, float end_angle, bint clockwise):
-        self.cpp_seg = new arc_segment(center.cpp_v[0], radius, start_angle, end_angle, clockwise)
-        self.owner = True
+    def __cinit__(self):
+        pass
+    
+    def __dealloc__(self):
+        if self.cpp_seg is not NULL:
+            del self.cpp_seg
+
+    @staticmethod
+    def arc1(Vec2D center, Vec2D point, float angle):
+        cdef arc_segment *arc = arc_segment.arc1(center.cpp_v[0], point.cpp_v[0], angle)
+        seg = ArcSegment()
+        seg.cpp_seg = arc
+        return seg
+
+    @staticmethod
+    def arc2(point1: Vec2D, point2: Vec2D, radius, is_clockwise: bool):
+        cdef arc_segment *seg = arc_segment.arc2(point1.cpp_v[0], point2.cpp_v[0], radius, is_clockwise)
+        if seg is not NULL:
+            arc_seg = ArcSegment()
+            arc_seg.cpp_seg = seg
+            return arc_seg
+
+        raise ValueError("Failed to create arc or line segment from points")
+    
+    @staticmethod
+    def arc3(point1: Vec2D, point2: Vec2D, angle: float):
+        seg = ArcSegment()
+        cdef arc_segment *arc = arc_segment.arc3(point1.cpp_v[0], point2.cpp_v[0], angle)
+        seg.cpp_seg = arc
+        return seg
+    
+    @staticmethod
+    def arc4(point1: Vec2D, point2: Vec2D, bulge: float):
+        seg = ArcSegment()
+        cdef arc_segment *arc = arc_segment.arc4(point1.cpp_v[0], point2.cpp_v[0], bulge)
+        seg.cpp_seg = arc
+        return seg
+    
+    @staticmethod
+    def arc5(point1: Vec2D, point2: Vec2D, point3: Vec2D):
+        seg = ArcSegment()
+        cdef arc_segment *arc = arc_segment.arc5(point1.cpp_v[0], point2.cpp_v[0], point3.cpp_v[0])
+        seg.cpp_seg = arc
+        return seg
+    
+    def _check_valid(self):
+        if self.cpp_seg is NULL:
+            raise ValueError("Segment is not initialized")
+
+    @property
+    def nhat_start(self):
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        v = Vec2D(seg.nhat_start.v[0], seg.nhat_start.v[1])
+        return v
     
     @property
-    def start(self):
-        v = Vec2D(self.cpp_seg.start.v[0], self.cpp_seg.start.v[1])
+    def nhat_end(self) -> Vec2D:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        v = Vec2D(seg.nhat_end.v[0], seg.nhat_end.v[1])
         return v
+    
+    @property
+    def center(self) -> Vec2D:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        v = Vec2D(seg.center.v[0], seg.center.v[1])
+        return v
+    
+    @property
+    def start(self) -> Vec2D:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        v = Vec2D(seg.start.v[0], seg.start.v[1])
+        return v
+    
+    @property
+    def radius(self) -> float:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        return seg.radius
 
-    @start.setter
-    def start(self, value: Vec2D):
-        self.cpp_seg.start = value.cpp_v[0]
+    @property
+    def start_angle(self) -> float:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        return seg.start_angle
+
+    @property
+    def end_angle(self) -> float:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        return seg.end_angle
+
+    @property
+    def is_clockwise(self) -> bool:
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        return seg.is_clockwise()
+
+    def to_dict(self):
+        """Convert the arc segment to a dictionary representation."""
+        self._check_valid()
+        cdef arc_segment *seg = <arc_segment*>self.cpp_seg
+        return {
+            'center': (seg.center.v[0], seg.center.v[1]),
+            'start': (seg.start.v[0], seg.start.v[1]),
+            'end': (seg.end.v[0], seg.end.v[1]),
+            'radius': seg.radius,
+            'start_angle': seg.start_angle,
+            'end_angle': seg.end_angle,
+            'nhat_start': (seg.nhat_start.v[0], seg.nhat_start.v[1]),
+            'nhat_end': (seg.nhat_end.v[0], seg.nhat_end.v[1]),
+            'is_clockwise': seg.is_clockwise()
+        }
 
     def __dealloc__(self):
         if self.owner:
@@ -140,17 +296,54 @@ cdef class ArcSegment(Segment):
 cdef class Path:
     cdef path* cpp_path
 
-    def __cinit__(self):
-        self.cpp_path = new path()
+    def __cinit__(self, empty=False):
+        """Initialize a new Path. If empty is True, creates an empty path."""
+        if empty:
+            self.cpp_path = NULL
+        else:
+            self.cpp_path = new path()
+    
+    def is_null(self):
+        """Check if the path is null (uninitialized)."""
+        return self.cpp_path is NULL
 
     def __dealloc__(self):
-        del self.cpp_path
+        if self.cpp_path is not NULL:
+            del self.cpp_path
 
-    def find_intersections(self):
-        self.cpp_path.find_intersections()
+    def offset(self, float distance):
+        p = Path(True)
+        cdef path* cpp_path = self.cpp_path.offset(distance, True)
+        p.cpp_path = cpp_path
+        return p
+
+    def segments(self) -> List[Segment]:
+        l = list()
+        cdef vector[segment*] segs = self.cpp_path.segments
+        cdef size_t n = segs.size()
+
+        cdef line_segment *line
+        cdef arc_segment *arc
+        cdef segment* s
+        cdef int i
+        for i in range(n):
+            s = segs[i]
+            line = as_line(s)
+            arc = as_arc(s)
+            if (line != NULL):
+                l.append(LineSegment(
+                    Vec2D(line.start.v[0], line.start.v[1]),
+                    Vec2D(line.end.v[0], line.end.v[1])
+                ))
+            else:
+                temp = ArcSegment()
+                temp.cpp_seg = arc.clone()
+                l.append(temp)
+
+        return l
 
     @staticmethod
-    def from_compact_array(cnp.ndarray[cnp.float32_t, ndim=2] arr):
+    def from_compact_array(cnp.ndarray[cnp.float32_t, ndim=2] arr, close: bool = True):
         if arr.shape[1] != 3:
             raise ValueError("Array must have shape (N, 3)")
 
@@ -166,8 +359,8 @@ cdef class Path:
             pt[2] = arr[i, 2]
             vec.push_back(pt)
         
-        cdef Path p = Path.__new__(Path)
-        cdef path *cpp_path = path.from_compact_array(vec)
+        cdef path *cpp_path = path.from_compact_array(vec, close)
+        p = Path(True)
         p.cpp_path = cpp_path
         return p
 
@@ -205,3 +398,49 @@ cdef vector_to_numpy_compact_point(vector[compact_point] v):
         arr[i, 1] = pt[1]
         arr[i, 2] = pt[2]
     return arr
+
+def intersections(List[Path] paths):
+    """Find intersections between multiple paths."""
+    cdef vector[vector[segment*]*] cpp_paths
+    cdef size_t i, j
+    cdef Path p
+
+    cdef vector[segment*] *segs
+    for i in range(len(paths)):
+        p = paths[i]
+        if p.is_null():
+            continue
+        segs = &p.cpp_path.segments
+        cpp_paths.push_back(segs)
+
+    cdef vector[intersection] result = find_intersections(cpp_paths)
+
+    out = []
+    cdef size_t path1_index, path2_index
+    cdef intersection inter
+    cdef size_t path1_address, path2_address
+    for j in range(len(paths)):
+        p = paths[j]
+        path1_address = <size_t>(&p.cpp_path.segments)
+
+    for i in range(result.size()):
+        inter = result[i]
+
+        for j in range(len(paths)):
+            p = paths[j]
+            if &p.cpp_path.segments == inter.path1:
+                path1_index = j
+            if &p.cpp_path.segments == inter.path2:
+                path2_index = j
+        # Convert pointer address to integer
+        # This is a workaround to get the memory address of the path segments
+        path1_address = <size_t>inter.path1
+        path2_address = <size_t>inter.path2
+        out.append({
+            'path1': paths[path1_index],
+            'index1': inter.index1,
+            'path2': paths[path2_index],
+            'index2': inter.index2,
+            'point': Vec2D(inter.point.v[0], inter.point.v[1])
+        })
+    return out

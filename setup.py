@@ -10,11 +10,12 @@ extensions = [
         "geometry",
         sources=[
             os.path.join(SRC_DIR, "geometry.pyx"),
-            os.path.join(SRC_DIR, "geom.cpp")
+            os.path.join(SRC_DIR, "geom.cpp"),
+            os.path.join(SRC_DIR, "math2d.cpp"),
+            os.path.join(SRC_DIR, "intersection.cpp")
         ],
         include_dirs=[SRC_DIR, numpy.get_include()],
         language="c++",
-        extra_compile_args=["/std:c++20"],
     )
 ]
 

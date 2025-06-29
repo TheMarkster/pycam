@@ -5,6 +5,24 @@ from libc.math cimport sinf, cosf, sqrtf
 from libc.float cimport FLT_MAX
 from libcpp cimport bool
 
+cdef extern from "pycam.hpp" namespace "":
+    cdef cppclass result[T]:
+        T data
+        bool success
+
+    cdef cppclass linked_list[T]:
+        pass
+    
+    cdef cppclass linked_item[T]:
+        T *si
+        linked_item *prevItem
+        linked_item *nextItem
+        linked_list[T] list
+    
+    cdef cppclass linkedList[T]:
+        linked_item[T] *head
+        linked_item[T] *tail
+
 cdef extern from "math2d.hpp" namespace "":
     cdef cppclass vec2d:
         float[2] v
@@ -89,10 +107,14 @@ cdef extern from "geom.hpp" namespace "":
         vec2d intersection(const segment& other) const
         vec2d intersection_with_line(const line_segment& first, bool arg_first) const
         vec2d intersection_with_arc(const arc_segment& first, bool arg_first) const
-        bool intersects(const segment& other) const
+        result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
     cdef cppclass line_segment(segment):
+        vec2d nhat
+        vec2d vhat
+        float s
+
         line_segment(const vec2d& start, const vec2d& end)
         void offset(float distance)
         bounding_box get_bounding_box() const
@@ -102,20 +124,42 @@ cdef extern from "geom.hpp" namespace "":
         vec2d intersection(const segment& other) const
         vec2d intersection_with_line(const line_segment& other, bool arg_first) const
         vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const
-        bool intersects(const segment& other) const
+        result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
     cdef cppclass arc_segment(segment):
-        arc_segment(const vec2d& center, float radius, float start_angle, float end_angle, bool is_clockwise)
+        vec2d center
+        vec2d nhat_start
+        vec2d nhat_end
+        float radius
+        float start_angle
+        float end_angle
+
+        arc_segment *clone() const
+
+        @staticmethod
+        arc_segment* from_compact_point(const compact_point& p0, const compact_point& p1)
+        @staticmethod
+        arc_segment* arc1(const vec2d & center, const vec2d & point, float angle)
+        @staticmethod
+        arc_segment* arc2(const vec2d & point1, const vec2d & point2, float radius, bool is_clockwise)
+        @staticmethod
+        arc_segment* arc3(const vec2d & point1, const vec2d & point2, float angle)
+        @staticmethod
+        arc_segment* arc4(const vec2d & point1, const vec2d & point2, float bulge)
+        @staticmethod
+        arc_segment* arc5(const vec2d & point1, const vec2d & point2, const vec2d & point3)
+        
         void offset(float distance)
         bounding_box get_bounding_box() const
+        bool is_clockwise() const
         bool diverges(const segment& other, float direction) const
         bool diverges_from_line(const line_segment& first, float direction) const
         bool diverges_from_arc(const arc_segment& first, float direction) const
         vec2d intersection(const segment& other) const
         vec2d intersection_with_line(const line_segment& line, bool arg_first) const
         vec2d intersection_with_arc(const arc_segment& other, bool arg_first) const
-        bool intersects(const segment& other) const
+        result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
     cdef cppclass bb_index:
@@ -124,17 +168,50 @@ cdef extern from "geom.hpp" namespace "":
         bool start
 
     cdef cppclass path:
+        vector[segment*] segments
+
         path()
         void add_segment(segment* seg)
         void insert_segment(size_t index, segment* seg)
 
-        path offset(float distance, bool arc_join)
+        path* offset(float distance, bool arc_join)
 
         @staticmethod
-        path* from_compact_array(const vector[compact_point] &cp)
+        path* from_compact_array(const vector[compact_point] &cp, bint close)
         vector[compact_point] to_compact_array() const
-        vector[vec2d] find_intersections()
     
+    cdef cppclass segment_info:
+        size_t id
+        const path *p
+        size_t index
+        const segment *seg
+        bounding_box box
+        bool start
+        float x
+    
+    cdef line_segment* as_line(segment* seg)
+    cdef arc_segment* as_arc(segment* seg)
+
+cdef extern from "intersection.hpp" namespace "":
+    vector[intersection] find_intersections(const vector[vector[segment*]*] &paths)
+
+    cdef cppclass intersection:
+        vector[segment*] *path1
+        size_t index1
+        vector[segment*] *path2
+        size_t index2
+        vec2d point
+
+    cdef cppclass segment_info:
+        size_t id
+        vector[segment*] *path
+        segment *seg
+        size_t index
+        bounding_box box
+        bool start
+        float x
+
+
 cdef vector_to_numpy_double(vector[double] v)
 cdef vector_to_numpy_float(vector[float] v)
 cdef vector_to_numpy_compact_point(vector[compact_point] v)
