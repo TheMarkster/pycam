@@ -53,12 +53,33 @@ public:
     virtual vec2d intersection_with_line(const line_segment& line, bool arg_first) const = 0;
     virtual vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const = 0;
     
+    virtual float trap_area() const = 0;
+
     result<vec2d> intersects(const segment &other) const;
 
-protected:
     virtual bool set_start_point(const vec2d& point) = 0;
     virtual bool set_end_point(const vec2d& point) = 0;
     virtual bool on_segment(const vec2d& point) const = 0;
+
+    virtual segment* bisect(const vec2d& point, bool before) const {
+        // Default implementation for segments that can be split
+        // This is a fallback and may not be valid for all segment types.
+        // Derived classes should override this method if they can split at a point.
+        // if (!on_segment(point)) {
+        //     return nullptr; // Cannot split if the point is not on the segment
+        // }
+
+        // Calculate the new segments
+        segment* seg = clone();
+        if (before) {
+            seg->set_end_point(point);
+            return seg;
+        }
+        else {
+            seg->set_start_point(point);
+            return seg;
+        }
+    }
 };
 
 class line_segment : public segment {
@@ -103,6 +124,7 @@ public:
     vec2d intersection_with_line(const line_segment& other, bool arg_first) const override;
     vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const override;
 
+    float trap_area() const override;
 protected:
     bool set_start_point(const vec2d& point) override;
     bool set_end_point(const vec2d& point) override;
@@ -149,8 +171,8 @@ public:
     bool offset(float distance) override;
     bounding_box get_bounding_box() const override {
         return bounding_box(
-            center.v[0] - radius, center.v[0] + radius,
-            center.v[1] - radius, center.v[1] + radius
+            center.v[0] - std::abs(radius), center.v[0] + std::abs(radius),
+            center.v[1] - std::abs(radius), center.v[1] + std::abs(radius)
         );
     };
 
@@ -161,6 +183,8 @@ public:
     vec2d intersection(const segment& other) const override;
     vec2d intersection_with_line(const line_segment& line, bool arg_first) const override;
     vec2d intersection_with_arc(const arc_segment& other, bool arg_first) const override;
+
+    float trap_area() const override;
 
 protected:
     bool set_start_point(const vec2d& point) override;
@@ -200,10 +224,16 @@ public:
         }
     }
 
+    bool clockwise_winding() const { return signed_area() > 0; }
+
     path* offset(float distance, bool arc_join);
 
     static path* from_compact_array(const std::vector<compact_point> &cp, bool c);
     std::vector<compact_point> to_compact_array() const;
+
+    std::vector<path*> get_closed_loops();
+
+    float signed_area() const;
 };
 
 inline line_segment* as_line(segment* seg) {
@@ -211,6 +241,70 @@ inline line_segment* as_line(segment* seg) {
 }
 inline arc_segment* as_arc(segment* seg) {
     return dynamic_cast<arc_segment*>(seg);
+}
+
+inline float arc_integral_top(float x0, float x1, float r, float h)
+{
+    float r2 = r * r;
+    float area = h * (x1 - x0); // Rectangular contribution
+    float a;
+    float nr = -r;
+    
+    if (x1 <= nr) {
+        area += -r2 * M_PI_4; // Full semicircle
+    }
+    else if (x1 >= r) {
+        area += r2 * M_PI_4; // Full semicircle
+    }
+    else {
+        a = std::sqrt(r2-x1*x1);
+        area += 0.5 * (x1 * a + r2*std::atan2(x1, a));
+    }
+
+    if (x0 <= nr) {
+        area -= -r2 * M_PI_4; // Full semicircle
+    }
+    else if (x0 >= r) {
+        area -= r2 * M_PI_4; // Full semicircle
+    }
+    else {
+        a = std::sqrt(r2-x0*x0);
+        area -= 0.5 * (x0 * a + r2*std::atan2(x0, a));
+    }
+
+    return area;
+}
+
+inline float arc_integral_bot(float x0, float x1, float r, float h)
+{
+    float r2 = r * r;
+    float area = h * (x1 - x0); // Rectangular contribution
+    float a;
+    float nr = -r;
+    
+    if (x1 <= nr) {
+        area -= -r2 * M_PI_4; // Full semicircle
+    }
+    else if (x1 >= r) {
+        area -= r2 * M_PI_4; // Full semicircle
+    }
+    else {
+        a = std::sqrt(r2-x1*x1);
+        area -= 0.5 * (x1 * a + r2*std::atan2(x1, a));
+    }
+
+    if (x0 <= nr) {
+        area += -r2 * M_PI_4; // Full semicircle
+    }
+    else if (x0 >= r) {
+        area += r2 * M_PI_4; // Full semicircle
+    }
+    else {
+        a = std::sqrt(r2-x0*x0);
+        area += 0.5 * (x0 * a + r2*std::atan2(x0, a));
+    }
+
+    return area;
 }
 
 #endif

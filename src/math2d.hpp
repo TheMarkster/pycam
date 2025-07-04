@@ -59,6 +59,9 @@ struct vec2d {
     float cross(const vec2d& rhs) const {
         return v[0] * rhs.v[1] - v[1] * rhs.v[0];
     }
+    bool close(const vec2d& rhs, float epsilon = 1e-6) const {
+        return std::abs(v[0] - rhs.v[0]) < epsilon && std::abs(v[1] - rhs.v[1]) < epsilon;
+    }
 };
 
 struct mat2d {

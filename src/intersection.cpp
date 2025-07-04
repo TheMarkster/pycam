@@ -13,7 +13,7 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
     segment *seg;
     segment_info si;
     id = 0;
-    for (std::vector<segment*> *container : paths) {
+    for (const std::vector<segment*> *container : paths) {
         si.path = container;
 
         for (i=0; i<container->size(); i++) {
@@ -45,6 +45,8 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
 
     // Scan through segments and find intersections
     size_t index = 0;
+    std::vector<linked_item<segment_info>*> itemLookup;
+    itemLookup.reserve(id);
     linked_item<segment_info> *item1, *item2;
     result<vec2d> intersection_result;
     while (index < listSortedSegments.size()) {
@@ -53,21 +55,12 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
         if (!si.start) {
             // std::cout << "Processing end of segment with id: " << si.id << std::endl;
             // Remove from active segments
-            item1 = listActiveSegments.head;
-            while (item1) {
-                if (item1->si.id == si.id) {
-                    // std::cout<< "Removing segment with id: " << si.id << std::endl;
-                    item1->remove();
-                    break;
-                }
-                item1 = item1->nextItem;
-            }
-            
+            itemLookup[si.id]->remove();
             continue;
         }
         else {
             // std::cout << "Processing start of segment with id: " << si.id << " and x " << si.x << std::endl;
-            listActiveSegments.add(si);
+            itemLookup[si.id] = listActiveSegments.add(si);
 
             // Grab all segments with the same x-coordinate
             while (true) {
@@ -79,7 +72,7 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
                 if (si.x == listActiveSegments.tail->si.x && si.start) {
                     // Add to active segments
                     // std::cout << "Adding additional segment with id: " << si.id << " and x " << si.x << std::endl;
-                    listActiveSegments.add(si);
+                    itemLookup[si.id] = listActiveSegments.add(si);
                     index++;
                 }
                 else {

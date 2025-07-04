@@ -1,11 +1,14 @@
 #include "geom.hpp"
 #include "math2d.hpp"
 #include "sorting.hpp"
+#include "intersection.hpp"
 #include <cmath>
 #include <algorithm>
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+#define DEBUG
 
 line_segment::line_segment(const vec2d& start, const vec2d& end)
     : segment(start, end) {
@@ -203,6 +206,13 @@ bool arc_segment::on_segment(const vec2d& point) const {
 }
 
 result<vec2d> segment::intersects(const segment& other) const {
+    // Exclude adjacent segments
+    if (start.close(other.end)) {
+        return result<vec2d>{start, false};
+    }
+    if (end.close(other.start)) {
+        return result<vec2d>{end, false};
+    }
     vec2d intersection_point = intersection(other);
     bool success = on_segment(intersection_point) && other.on_segment(intersection_point);
     return result<vec2d>{intersection_point, success};
@@ -251,6 +261,12 @@ std::vector<compact_point> path::to_compact_array() const {
     return data;
 }
 
+inline void intersect(segment* seg1, segment* seg2) {
+    vec2d intersection = seg1->intersection(*seg2);
+    seg1->set_end_point(intersection);
+    seg2->set_start_point(intersection);
+}
+
 path* path::offset(float distance, bool arc_join) {
     // Create a new path for the offset segments
     path *offset_path = new path();
@@ -279,6 +295,9 @@ path* path::offset(float distance, bool arc_join) {
                 if (temp != NULL) {
                     offset_path->add_segment(temp);
                 }
+                else {
+                    temp = NULL;
+                }
             }
             else {
                 temp = new line_segment(prev->end, offset_segment->start);
@@ -286,79 +305,99 @@ path* path::offset(float distance, bool arc_join) {
                 if (temp != NULL) {
                     offset_path->add_segment(temp);
                 }
+                else {
+                    temp = NULL;
+                }
             }
             offset_path->add_segment(offset_segment);
             prev = offset_segment;
         }
         else {
-            while (true) {
-                if (offset_path->segments.empty()) {
-                    // No segments in the offset path, add the first segment
-                    offset_path->add_segment(offset_segment);
-                    prev = offset_segment;
-                    break;
-                }
+            // while (true) {
+            //     if (offset_path->segments.empty()) {
+            //         // No segments in the offset path, add the first segment
+            //         offset_path->add_segment(offset_segment);
+            //         prev = offset_segment;
+            //         break;
+            //     }
                 
-                top = offset_path->segments[offset_path->segments.size() - 1];
-                intersection = offset_segment->intersection(*top);
+            //     top = offset_path->segments[offset_path->segments.size() - 1];
+            //     intersection = offset_segment->intersection(*top);
 
-                if (!top->set_end_point(intersection)) {
-                    offset_path->segments.pop_back();
-                    delete top;
-                }
-                else {
-                    if (offset_segment->set_start_point(intersection)) {
-                        // The segment is now valid
-                        offset_path->add_segment(offset_segment);
-                        prev = offset_segment;
-                        break;
-                    }
-                    else {
-                        // The segment is not valid, remove it
-                        delete offset_segment;
-                        prev = top;
-                        break;
-                    }
-                }
-            }
+            //     if (!top->set_end_point(intersection)) {
+            //         offset_path->segments.pop_back();
+            //         delete top;
+            //     }
+            //     else {
+            //         if (offset_segment->set_start_point(intersection)) {
+            //             // The segment is now valid
+            //             offset_path->add_segment(offset_segment);
+            //             prev = offset_segment;
+            //             break;
+            //         }
+            //         else {
+            //             // The segment is not valid, remove it
+            //             delete offset_segment;
+            //             prev = top;
+            //             break;
+            //         }
+            //     }
+            // }
+
+            intersect(prev, offset_segment);
+
+            offset_path->add_segment(offset_segment);
+            prev = offset_segment;
         }
     }
 
     // Intersect first and last segments
-    while (true) {
-        if (offset_path->segments.size() < 3) {
-            break;
-        }
+    // while (true) {
+    //     if (offset_path->segments.size() < 3) {
+    //         break;
+    //     }
         
-        top = offset_path->segments[0];
-        prev = offset_path->segments[offset_path->segments.size() - 1];
-        intersection = prev->intersection(*top);
+    //     top = offset_path->segments[0];
+    //     prev = offset_path->segments[offset_path->segments.size() - 1];
+    //     intersection = prev->intersection(*top);
 
-        if (prev->set_end_point(intersection)) {
-            if (top->set_start_point(intersection)) {
-                break;
+    //     if (prev->set_end_point(intersection)) {
+    //         if (top->set_start_point(intersection)) {
+    //             break;
+    //         }
+    //         else {
+    //             // The segment is not valid, remove it
+    //             offset_path->segments.pop_back();
+    //             delete prev;
+    //         }
+    //     }
+    //     else {
+    //         offset_path->segments.erase(offset_path->segments.begin());
+    //         delete top;
+    //     }
+    // }
+
+    // Close the start and end points
+    prev->set_end_point(offset_path->segments[0]->start);
+
+    if (offset_path->segments.size() > 2) {
+        return offset_path;
+    } else if (offset_path->segments.size() == 2) {
+        // Valid if at least one arc segment
+        for (segment *seg : offset_path->segments) {
+            if (dynamic_cast<arc_segment*>(seg) != nullptr) {
+                return offset_path;
             }
-            else {
-                // The segment is not valid, remove it
-                offset_path->segments.pop_back();
-                delete prev;
-            }
-        }
-        else {
-            offset_path->segments.erase(offset_path->segments.begin());
-            delete top;
         }
     }
-
-    if (offset_path->segments.size() < 3) {
-        // Need at least 3 segments to form a closed path
-        while (!offset_path->segments.empty()) {
-            delete offset_path->segments.back();
-            offset_path->segments.pop_back();
-        }
+    
+    // Not a valid path
+    while (!offset_path->segments.empty()) {
+        delete offset_path->segments.back();
+        offset_path->segments.pop_back();
     }
 
-    return offset_path;
+    return nullptr;
 }
 
 arc_segment* arc_segment::arc1(const vec2d & center, const vec2d & point, float angle) {
@@ -382,7 +421,7 @@ arc_segment* arc_segment::arc1(const vec2d & center, const vec2d & point, float 
 arc_segment* arc_segment::arc2(const vec2d & point1, const vec2d & point2, float radius, bool is_clockwise) {
     vec2d midpoint = (point1 + point2) / 2;
     vec2d v21 = (point2 - point1);
-    float off = radius * radius - v21.dot(v21);
+    float off = radius * radius - v21.dot(v21)/4;
     v21 = v21.normalized();
     
     vec2d center;
@@ -601,4 +640,237 @@ bool arc_segment::set_start_point(const vec2d& point) {
     }
     else
         return true;
+}
+
+float line_segment::trap_area() const {
+    return 0.5 * (start.v[1] + end.v[1]) * (end.v[0] - start.v[0]);
+}
+
+inline float arc_integral(float x)
+{
+    float area;
+    if (x >= 1)
+        area = 0.0;
+    else if (x <= -1)
+        area = M_PI_2;
+    else
+        area = 0.5 * x * std::sqrt(1-x*x) - std::atan2(std::sqrt(1-x*x), x+1);
+    return area;
+}
+
+
+
+inline double modulo(double x, double m) {
+    return (x - std::floor(x / m) * m);
+}
+
+inline float modulo(float x, float m) {
+    return (x - std::floor(x / m) * m);
+}
+
+inline int modulo(int x, int m) {
+    return (x % m + m) % m; // Ensure non-negative result
+}
+
+float arc_segment::trap_area() const {
+    // Calculates the signed area between the arc segment and the x-axis
+    // 
+
+    bool clockwise = is_clockwise();
+
+    float a0, a1;
+    bool h1, h2;
+    float x0, x1;
+    if (clockwise) {
+        a0 = modulo(start_angle+M_PI, 2 * M_PI)-M_PI;
+        a1 = modulo(end_angle+M_PI, 2 * M_PI)-M_PI;
+    } else {
+        a0 = modulo(end_angle+M_PI, 2 * M_PI)-M_PI;
+        a1 = modulo(start_angle+M_PI, 2 * M_PI)-M_PI;
+    }
+
+    x0 = std::cos(a0)*radius;
+    x1 = std::cos(a1)*radius;
+    h1 = a0 >= 0;
+    h2 = a1 >= 0;
+
+    float area = 0.0; // Rectangular contribution
+    if (h1 == h2) {
+        // Start and stop on same half-plane
+        if (h1) {
+            if (x1 < x0) {
+                area += arc_integral_top(x0, radius, radius, center.v[1]);
+                area += arc_integral_top(-radius, x1, radius, center.v[1]);
+                // area -= arc_integral_bot(-radius, radius, radius, center.v[1]);
+                area -= (2*radius*center.v[1] - M_PI_2*radius*radius);
+            }
+            else {
+                area += arc_integral_top(x0, x1, radius, center.v[1]);
+            }
+        }
+        else {
+            if (x1 > x0) {
+                area -= arc_integral_bot(-radius, x0, radius, center.v[1]);
+                area -= arc_integral_bot(x1, radius, radius, center.v[1]);
+                // area += arc_integral_top(-radius, radius, radius, center.v[1]);
+                area += (2*radius*center.v[1] + M_PI_2*radius*radius);
+            }
+            else {
+                area -= arc_integral_bot(x1, x0, radius, center.v[1]);
+            }
+        }
+    } else {
+        if (h1) {
+            area += arc_integral_top(x0, radius, radius, center.v[1]);
+            area -= arc_integral_bot(x1, radius, radius, center.v[1]);
+        }
+        else {
+            area += arc_integral_top(-radius, x1, radius, center.v[1]);
+            area -= arc_integral_bot(-radius, x0, radius, center.v[1]);
+        }
+    }
+
+    if (clockwise) {
+        return area;
+    } else {
+        return -area;
+    }
+}
+
+struct path_or_intersection {
+    path *thePath;
+    intersection *theIntersection;
+};
+
+std::vector<path*> path::get_closed_loops() {
+    // Return a vector of valid paths from the segments in this path
+    std::vector<path*> valid_paths;
+
+    std::vector<std::vector<segment*>*> paths;
+    paths.push_back(&segments);
+    std::vector<intersection> intersections = find_intersections(paths);
+
+    // Iterate over the path and generate partial segments
+    if (intersections.empty()) {
+        // No intersections found, the path is valid as is
+        valid_paths.push_back(this);
+        return valid_paths;
+    }
+
+    size_t n = intersections.size();
+    size_t i, j, ii, jj;
+    for (i = 0; i < n; i++) {
+        // Duplicate the intersections so we have one for each segment
+        intersections.push_back(intersections[i]);
+        intersections.back().index1 = (intersections[i].index2);
+        intersections.back().index2 = (intersections[i].index1);
+    }
+
+    // Sort intersections by their segment indices
+    std::sort(intersections.begin(), intersections.end(), [](const intersection& a, const intersection& b) {
+        return a.index1 < b.index1;
+    });
+
+    linked_list<path_or_intersection> stack;
+    linked_item<path_or_intersection> *item, *prevItem;
+
+    segment *seg;
+    path *temp, *merger;
+    intersection *prev, *current;
+    prev = &intersections[intersections.size() - 1]; // Start with the last intersection
+    for (i=0; i<intersections.size(); i++) {
+        current = &intersections[i];
+
+        // Create a path between the two intersections
+        temp = new path();
+        ii = prev->index1;
+        jj = current->index1;
+        seg = segments[prev->index1]->bisect(prev->point, false);
+        temp->add_segment(seg);
+        ii = (ii+1) % segments.size(); // Move to the next segment
+        while (ii != jj) {
+            seg = segments[ii];
+            temp->segments.push_back(seg->clone());
+            ii = (ii+1) % segments.size(); // Move to the next segment
+        }
+        seg = segments[current->index1]->bisect(current->point, true);
+        temp->add_segment(seg);
+        
+        // Add path to the stack
+        item = stack.add();
+        item->si.thePath = temp;
+        item->si.theIntersection = nullptr;
+
+        // Check if intersection has occurred
+        // If it has, pop all items until prev intersection is found
+        // Merge paths and add to output
+        item = stack.head;
+        size_t k;
+        while (item) {
+            if (item->si.theIntersection != nullptr) {
+                if (item->si.theIntersection->point.close(current->point)) {
+                    merger = new path(); // Clone the current path
+                    while (item) {
+                        if (item->si.thePath != nullptr) {
+                            // We have a segment to merge
+                            for (k = 0; k < item->si.thePath->segments.size(); k++) {
+                                merger->add_segment(item->si.thePath->segments[k]->clone());
+                            }
+
+                            delete item->si.thePath; // Free the path
+                        }
+
+                        prevItem = item;
+                        item = item->nextItem; // Move to the next item
+                        prevItem->remove();
+                    }
+
+                    valid_paths.push_back(merger);
+                    goto intersection_found; // Exit the loop
+                }
+            }
+            item = item->nextItem; // Move to the next item
+        }
+
+        // First instance of intersection, add to stack
+        item = stack.add();
+        item->si.thePath = nullptr;
+        item->si.theIntersection = current; // Mark this intersection
+
+intersection_found:
+        prev = current;
+    }
+
+    
+    if (stack.head) {
+        item = stack.head;
+        while (item != nullptr) {
+            merger = new path(); // Clone the current path
+            if (item->si.thePath) {
+                for (i=0; i < item->si.thePath->segments.size(); i++) {
+                    merger->add_segment(item->si.thePath->segments[i]->clone());
+                }
+                delete item->si.thePath; // Free the path
+            }
+            else {
+#ifdef DEBUG
+                // We have a path without a matching intersection
+                std::cout << "DEBUG: Found a path without a matching intersection." << std::endl;
+#endif
+            }
+            item = item->nextItem; // Move to the next item
+        }
+        valid_paths.push_back(merger);
+    }
+
+    return valid_paths;
+}
+
+float path::signed_area() const {
+    // Calculate the signed area of the path
+    float area = 0.0f;
+    for (const auto& seg : segments) {
+        area += seg->trap_area();
+    }
+    return area;
 }

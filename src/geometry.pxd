@@ -110,6 +110,8 @@ cdef extern from "geom.hpp" namespace "":
         result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
+        float trap_area() const
+
     cdef cppclass line_segment(segment):
         vec2d nhat
         vec2d vhat
@@ -179,7 +181,12 @@ cdef extern from "geom.hpp" namespace "":
         @staticmethod
         path* from_compact_array(const vector[compact_point] &cp, bint close)
         vector[compact_point] to_compact_array() const
-    
+
+        bool clockwise_winding() const
+        float signed_area() const
+
+        vector[path*] get_closed_loops()
+
     cdef cppclass segment_info:
         size_t id
         const path *p

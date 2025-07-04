@@ -129,6 +129,11 @@ cdef class Segment:
             return Vec2D(res.data.v[0], res.data.v[1])
         else:
             return None
+    
+    def trap_area(self) -> float:
+        if self.cpp_seg is not NULL:
+            return self.cpp_seg.trap_area()
+        return 0.0
 
 
 cdef class LineSegment(Segment):
@@ -310,6 +315,18 @@ cdef class Path:
     def __dealloc__(self):
         if self.cpp_path is not NULL:
             del self.cpp_path
+    
+    def clockwise_winding(self) -> bool:
+        """Check if the path has clockwise winding."""
+        if self.cpp_path is NULL:
+            raise ValueError("Path is not initialized")
+        return self.cpp_path.clockwise_winding()
+
+    def signed_area(self) -> float:
+        """Calculate the signed area of the path."""
+        if self.is_null():
+            raise ValueError("Path is not initialized")
+        return self.cpp_path.signed_area()
 
     def offset(self, float distance):
         p = Path(True)
@@ -341,6 +358,22 @@ cdef class Path:
                 l.append(temp)
 
         return l
+    
+    def get_closed_loops(self) -> List['Path']:
+        """Get closed loops from the path."""
+        if self.cpp_path is NULL:
+            raise ValueError("Path is not initialized")
+        
+        cdef vector[path*] cpp_loops = self.cpp_path.get_closed_loops()
+        cdef size_t n = cpp_loops.size()
+        loops = []
+
+        for i in range(n):
+            p = Path(True)
+            p.cpp_path = cpp_loops[i]
+            loops.append(p)
+
+        return loops
 
     @staticmethod
     def from_compact_array(cnp.ndarray[cnp.float32_t, ndim=2] arr, close: bool = True):

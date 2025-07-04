@@ -17,14 +17,17 @@ struct linked_item {
     linked_item *nextItem;
     linked_list<T> *list = nullptr;
 
+    linked_item(linked_list<T> *list, linked_item *prev, linked_item *next)
+        : list(list), prevItem(prev), nextItem(next) {}
+
     linked_item(linked_list<T> *list, T si, linked_item *prev, linked_item *next)
         : list(list), si(si), prevItem(prev), nextItem(next) {}
 
     void remove() {
-        if (prevItem) prevItem->nextItem = nextItem;
+        if (prevItem != nullptr) prevItem->nextItem = nextItem;
         else list->head = nextItem;
 
-        if (nextItem) nextItem->prevItem = prevItem;
+        if (nextItem != nullptr) nextItem->prevItem = prevItem;
         else list->tail = prevItem;
 
         delete this;
@@ -32,14 +35,14 @@ struct linked_item {
 
     void insert_after(T new_si) {
         linked_item *new_item = new linked_item(list, new_si, this, nextItem);
-        if (nextItem) nextItem->prevItem = new_item;
+        if (nextItem != nullptr) nextItem->prevItem = new_item;
         else list->tail = new_item;
         nextItem = new_item;
     }
 
     void insert_before(T new_si) {
         linked_item *new_item = new linked_item(list, new_si, prevItem, this);
-        if (prevItem) prevItem->nextItem = new_item;
+        if (prevItem != nullptr) prevItem->nextItem = new_item;
         else list->head = new_item;
         prevItem = new_item;
     }
@@ -71,13 +74,24 @@ struct linked_list {
         return count;
     }
 
-    void add(T si) {
+    linked_item<T>* add() {
         if (!tail) {
-            head = tail = new linked_item{this, si, (linked_item<T>*)nullptr, (linked_item<T>*)nullptr};
+            head = tail = new linked_item<T>{this, (linked_item<T>*)nullptr, (linked_item<T>*)nullptr};
         } else {
-            tail->nextItem = new linked_item{this, si, tail, (linked_item<T>*)nullptr};
+            tail->nextItem = new linked_item<T>{this, tail, (linked_item<T>*)nullptr};
             tail = tail->nextItem;
         }
+        return tail;
+    }
+
+    linked_item<T>* add(T si) {
+        if (!tail) {
+            head = tail = new linked_item<T>{this, si, (linked_item<T>*)nullptr, (linked_item<T>*)nullptr};
+        } else {
+            tail->nextItem = new linked_item<T>{this, si, tail, (linked_item<T>*)nullptr};
+            tail = tail->nextItem;
+        }
+        return tail;
     }
 };
 
