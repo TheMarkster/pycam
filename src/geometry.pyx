@@ -134,6 +134,12 @@ cdef class Segment:
         if self.cpp_seg is not NULL:
             return self.cpp_seg.trap_area()
         return 0.0
+    
+    def c_to_string(self):
+        """Convert the segment to a string representation using C++."""
+        if self.cpp_seg is NULL:
+            raise ValueError("Segment is not initialized")
+        return self.cpp_seg.to_string().decode('utf-8')
 
 
 cdef class LineSegment(Segment):
@@ -307,14 +313,11 @@ cdef class Path:
             self.cpp_path = NULL
         else:
             self.cpp_path = new path()
-    
-    def is_null(self):
-        """Check if the path is null (uninitialized)."""
-        return self.cpp_path is NULL
 
     def __dealloc__(self):
         if self.cpp_path is not NULL:
             del self.cpp_path
+            self.cpp_path = NULL
     
     def clockwise_winding(self) -> bool:
         """Check if the path has clockwise winding."""
@@ -324,15 +327,24 @@ cdef class Path:
 
     def signed_area(self) -> float:
         """Calculate the signed area of the path."""
-        if self.is_null():
+        if self.cpp_path is NULL:
             raise ValueError("Path is not initialized")
         return self.cpp_path.signed_area()
 
-    def offset(self, float distance):
-        p = Path(True)
-        cdef path* cpp_path = self.cpp_path.offset(distance, True)
-        p.cpp_path = cpp_path
-        return p
+    def offset(self, float distance, arc: bool = True, cull: bool = True) -> List['Path']:
+        if self.cpp_path is NULL:
+            raise ValueError("Path is not initialized")
+        
+        cdef vector[path*] cpp_path = self.cpp_path.offset(distance, arc, cull)
+        cdef size_t n = cpp_path.size()
+
+        out = []
+        for i in range(n):
+            p = Path(True)
+            p.cpp_path = cpp_path[i]
+            out.append(p)
+
+        return out
 
     def segments(self) -> List[Segment]:
         l = list()
@@ -354,7 +366,7 @@ cdef class Path:
                 ))
             else:
                 temp = ArcSegment()
-                temp.cpp_seg = arc.clone()
+                temp.cpp_seg = arc.copy()
                 l.append(temp)
 
         return l
@@ -402,6 +414,12 @@ cdef class Path:
         cdef np_arr = vector_to_numpy_compact_point(cp)
 
         return np_arr
+    
+    def c_to_string(self):
+        """Convert the path to a string representation using C++."""
+        if self.cpp_path is NULL:
+            raise ValueError("Path is not initialized")
+        return self.cpp_path.to_string().decode('utf-8')
 
 cdef vector_to_numpy_double(vector[double] v):
     """Convert a C++ vector of doubles to a NumPy array."""
@@ -441,7 +459,7 @@ def intersections(List[Path] paths):
     cdef vector[segment*] *segs
     for i in range(len(paths)):
         p = paths[i]
-        if p.is_null():
+        if p.cpp_path is NULL:
             continue
         segs = &p.cpp_path.segments
         cpp_paths.push_back(segs)

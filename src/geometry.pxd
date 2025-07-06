@@ -4,6 +4,7 @@ from libcpp.span cimport span
 from libc.math cimport sinf, cosf, sqrtf
 from libc.float cimport FLT_MAX
 from libcpp cimport bool
+from libcpp.string cimport string
 
 cdef extern from "pycam.hpp" namespace "":
     cdef cppclass result[T]:
@@ -112,6 +113,8 @@ cdef extern from "geom.hpp" namespace "":
 
         float trap_area() const
 
+        string to_string() const
+
     cdef cppclass line_segment(segment):
         vec2d nhat
         vec2d vhat
@@ -129,6 +132,8 @@ cdef extern from "geom.hpp" namespace "":
         result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
+        string to_string() const
+
     cdef cppclass arc_segment(segment):
         vec2d center
         vec2d nhat_start
@@ -137,7 +142,7 @@ cdef extern from "geom.hpp" namespace "":
         float start_angle
         float end_angle
 
-        arc_segment *clone() const
+        arc_segment *copy() const
 
         @staticmethod
         arc_segment* from_compact_point(const compact_point& p0, const compact_point& p1)
@@ -164,6 +169,8 @@ cdef extern from "geom.hpp" namespace "":
         result[vec2d] intersects(const segment& other) const
         bool on_segment(const vec2d& point)
 
+        string to_string() const
+
     cdef cppclass bb_index:
         bounding_box box
         segment* seg
@@ -176,7 +183,7 @@ cdef extern from "geom.hpp" namespace "":
         void add_segment(segment* seg)
         void insert_segment(size_t index, segment* seg)
 
-        path* offset(float distance, bool arc_join)
+        vector[path*] offset(float distance, bool arc_join, bool cull)
 
         @staticmethod
         path* from_compact_array(const vector[compact_point] &cp, bint close)
@@ -186,6 +193,8 @@ cdef extern from "geom.hpp" namespace "":
         float signed_area() const
 
         vector[path*] get_closed_loops()
+
+        string to_string() const
 
     cdef cppclass segment_info:
         size_t id

@@ -5,6 +5,8 @@
 #include <array>
 #include "math2d.hpp"
 #include "pycam.hpp"
+#include <sstream>
+#include <iomanip>
 
 struct compact_point {
     float v[3]; // x, y, bulge
@@ -35,7 +37,7 @@ public:
     segment() {};
     segment(const vec2d& start, const vec2d& end) : start(start), end(end) {}
 
-    virtual segment* clone() const = 0;
+    virtual segment* copy() const = 0;
 
     virtual vec2d get_nhat_start() const = 0;
     virtual vec2d get_nhat_end() const = 0;
@@ -59,27 +61,46 @@ public:
 
     virtual bool set_start_point(const vec2d& point) = 0;
     virtual bool set_end_point(const vec2d& point) = 0;
-    virtual bool on_segment(const vec2d& point) const = 0;
+    virtual float get_position(const vec2d & point) const = 0;
+    bool on_segment(const vec2d& point, float epsilon = 1e-6) const {
+        float pos = get_position(point);
+        return (pos >= -epsilon && pos <= 1 + epsilon);
+    }
 
-    virtual segment* bisect(const vec2d& point, bool before) const {
-        // Default implementation for segments that can be split
-        // This is a fallback and may not be valid for all segment types.
-        // Derived classes should override this method if they can split at a point.
-        // if (!on_segment(point)) {
-        //     return nullptr; // Cannot split if the point is not on the segment
-        // }
-
+    segment* bisect(const vec2d& point, bool before) const {
         // Calculate the new segments
-        segment* seg = clone();
+        segment* seg;
         if (before) {
-            seg->set_end_point(point);
+            if (point.close(start)) {
+                // If the point is at the start, we cannot create a segment before it
+                return nullptr;
+            }
+            
+            seg = copy(); // Create a copy of the segment
+            
+            if (!point.close(end)) {
+                seg->set_end_point(point);
+            }
+            
             return seg;
         }
         else {
-            seg->set_start_point(point);
+            if (point.close(end)) {
+                // If the point is at the end, we cannot create a segment after it
+                return nullptr;
+            }
+
+            seg = copy(); // Create a copy of the segment
+            
+            if (!point.close(start)) {
+                seg->set_start_point(point);
+            }
+            
             return seg;
         }
     }
+
+    virtual std::string to_string() const = 0;
 };
 
 class line_segment : public segment {
@@ -94,7 +115,7 @@ public:
     vec2d get_nhat_start() const { return nhat; }
     vec2d get_nhat_end() const { return nhat; }
 
-    segment* clone() const override {
+    segment* copy() const override {
         return new line_segment(start, end);
     }
 
@@ -125,11 +146,16 @@ public:
     vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const override;
 
     float trap_area() const override;
+    float get_position(const vec2d &point) const override;
+
+    std::string to_string() const override {
+        std::ostringstream oss;
+        oss << "LineSegment: Start(" << start.to_string() << "), End(" << end.to_string() << ")";
+        return oss.str();
+    }
 protected:
     bool set_start_point(const vec2d& point) override;
     bool set_end_point(const vec2d& point) override;
-
-    bool on_segment(const vec2d& point) const override;
 };
 
 class arc_segment : public segment {
@@ -159,7 +185,7 @@ public:
 
     bool is_clockwise() const { return radius > 0 ? end_angle < start_angle : end_angle > start_angle; }
 
-    segment* clone() const override {
+    segment* copy() const override {
         arc_segment *temp = new arc_segment(start, end, center, nhat_start, nhat_end, radius, start_angle, end_angle);
         return temp;
     }
@@ -186,11 +212,19 @@ public:
 
     float trap_area() const override;
 
+    std::string to_string() const override {
+        std::ostringstream oss;
+        oss << "ArcSegment: Center(" << center.to_string() << "), Radius(" << radius << ")";
+        oss << ", Start Angle(" << start_angle << "), End Angle(" << end_angle << ")";
+        oss << ", Start(" << start.to_string() << "), End(" << end.to_string() << ")";
+        return oss.str();
+    }
+
+    float get_position(const vec2d &point) const override;
+
 protected:
     bool set_start_point(const vec2d& point) override;
     bool set_end_point(const vec2d& point) override;
-
-    bool on_segment(const vec2d& point) const override;
 };
 
 struct bb_index {
@@ -212,8 +246,25 @@ public:
         }
     }
 
+    path *copy() const {
+        path *new_path = new path();
+        for (auto seg : segments) {
+            new_path->add_segment(seg->copy());
+        }
+        return new_path;
+    }
+
     void add_segment(segment* seg) {
+        if (!seg) {
+            return; // Avoid adding null segments
+        }
         segments.push_back(seg);
+    }
+
+    void add_path(const path &other) {
+        for (auto seg : other.segments) {
+            segments.push_back(seg->copy());
+        }
     }
 
     void insert_segment(size_t index, segment* seg) {
@@ -226,7 +277,7 @@ public:
 
     bool clockwise_winding() const { return signed_area() > 0; }
 
-    path* offset(float distance, bool arc_join);
+    std::vector<path*> offset(float distance, bool arc_join, bool cull);
 
     static path* from_compact_array(const std::vector<compact_point> &cp, bool c);
     std::vector<compact_point> to_compact_array() const;
@@ -234,6 +285,15 @@ public:
     std::vector<path*> get_closed_loops();
 
     float signed_area() const;
+
+    std::string to_string() const {
+        std::ostringstream oss;
+        oss << "Path with " << segments.size() << " segments:\n";
+        for (const auto& seg : segments) {
+            oss << "  - " << seg->to_string() << "\n";
+        }
+        return oss.str();
+    }
 };
 
 inline line_segment* as_line(segment* seg) {

@@ -2,6 +2,8 @@
 #pragma once
 #include <cmath>
 #include <float.h>
+#include <sstream>
+#include <iomanip>
 
 struct vec2d {
     float v[2];
@@ -61,6 +63,12 @@ struct vec2d {
     }
     bool close(const vec2d& rhs, float epsilon = 1e-6) const {
         return std::abs(v[0] - rhs.v[0]) < epsilon && std::abs(v[1] - rhs.v[1]) < epsilon;
+    }
+    
+    std::string to_string() const {
+        std::stringstream ss;
+        ss << std::fixed << std::setprecision(2) << "(" << v[0] << ", " << v[1] << ")";
+        return ss.str();
     }
 };
 
@@ -266,4 +274,16 @@ inline float angle_norm(const vec2d& a) {
 
 inline float angle(const vec2d& a) {
     return angle_norm(a.normalized());
+}
+
+inline double modulo(double x, double m) {
+    return (x - std::floor(x / m) * m);
+}
+
+inline float modulo(float x, float m) {
+    return (x - std::floor(x / m) * m);
+}
+
+inline int modulo(int x, int m) {
+    return (x % m + m) % m; // Ensure non-negative result
 }

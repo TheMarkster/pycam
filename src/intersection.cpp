@@ -1,11 +1,51 @@
 #include "intersection.hpp"
+#include "pycam.hpp"
 #include <algorithm>
 #include <iostream>
+
+inline result<intersection> check_intersection(const segment_info &si1, const segment_info &si2) {
+    result<intersection> res;
+
+    if (si1.box.intersects(si2.box)) {
+        // std::cout << "Bounding boxes intersect for segments with ids: "
+        //           << si.id << " and " << si2.id << std::endl;
+        vec2d intersection_point = si1.seg->intersection(*si2.seg);
+        float pos1 = si1.seg->get_position(intersection_point);
+        float pos2 = si2.seg->get_position(intersection_point);
+        // Check for actual intersection
+        intersection inter;
+        if ((pos1 >= -EPS && pos1 <= 1 + EPS) &&
+            (pos2 >= -EPS && pos2 <= 1 + EPS)) {
+            
+            inter.path1 = si1.path;
+            inter.index1 = si1.index;
+            inter.pos1 = pos1;
+
+            inter.path2 = si2.path;
+            inter.index2 = si2.index;
+            inter.pos2 = pos2;
+
+            inter.point = intersection_point;
+
+            // Add intersection to results
+            res.data = inter;
+            res.success = true;
+        }
+        else {
+            res.success = false;
+        }
+    }
+    else {
+        res.success = false;
+    }
+    return res;
+}
 
 std::vector<intersection> find_intersections(const std::vector<std::vector<segment*>*> &paths) {
     std::vector<intersection> listIntersections;
     std::vector<segment_info> listSortedSegments;
     linked_list<segment_info> listActiveSegments;
+    std::vector<segment_info> newComers;
 
     // Sort all segments by their x-coordinates for horizontal sweep line algorithm
     // Create list off all events (start and end points of segments)
@@ -45,6 +85,7 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
 
     // Scan through segments and find intersections
     size_t index = 0;
+    size_t index_diff;
     std::vector<linked_item<segment_info>*> itemLookup;
     itemLookup.reserve(id);
     linked_item<segment_info> *item1, *item2;
@@ -60,7 +101,7 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
         }
         else {
             // std::cout << "Processing start of segment with id: " << si.id << " and x " << si.x << std::endl;
-            itemLookup[si.id] = listActiveSegments.add(si);
+            newComers.push_back(si);
 
             // Grab all segments with the same x-coordinate
             while (true) {
@@ -69,10 +110,10 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
 
                 si = listSortedSegments[index];
                 
-                if (si.x == listActiveSegments.tail->si.x && si.start) {
+                if (si.x == newComers.back().x && si.start) {
                     // Add to active segments
                     // std::cout << "Adding additional segment with id: " << si.id << " and x " << si.x << std::endl;
-                    itemLookup[si.id] = listActiveSegments.add(si);
+                    newComers.push_back(si);
                     index++;
                 }
                 else {
@@ -81,49 +122,63 @@ std::vector<intersection> find_intersections(const std::vector<std::vector<segme
             }
         }
 
-        item1 = listActiveSegments.head;
-        while (item1) {
-            // std::cout << "Active segment with id: " << item1->si.id << " and x " << item1->si.x << std::endl;
-            item1 = item1->nextItem;
-        }
-
         // Check for intersections amongst active segments
-        item1 = listActiveSegments.head;
-        while (item1) {
+        // item1 = listActiveSegments.head;
+        for (auto &si1 : newComers) {
             item2 = listActiveSegments.head;
             while (item2) {
-                if (item1->si.id <= item2->si.id) {
-                    // std::cout << "Skipping self-intersection for segment with id: " << item1->si.id << std::endl;
-                    item2 = item2->nextItem;
-                    continue; // Skip self-intersection
-                }
-
-                // std::cout << "Checking intersection between segments with ids: "
-                        //   << item1->si.id << " and " << item2->si.id << std::endl;
-                // Check bounding box intersection first
-                if (item1->si.box.intersects(item2->si.box)) {
-                    // std::cout << "Bounding boxes intersect for segments with ids: "
-                    //           << item1->si.id << " and " << item2->si.id << std::endl;
-                    intersection_result = item1->si.seg->intersects(*item2->si.seg);
-                    // Check for actual intersection
-                    if (intersection_result.success) {
-                        intersection inter;
-                        inter.path1 = item1->si.path;
-                        inter.index1 = item1->si.index;
-
-                        inter.path2 = item2->si.path;
-                        inter.index2 = item2->si.index;
-
-                        inter.point = intersection_result.data;
-
-                        // Add intersection to results
-                        listIntersections.push_back(inter);
+                if (si1.path == item2->si.path) {
+                    if (si1.index > item2->si.index) {
+                        index_diff = si1.index - item2->si.index;
+                    }
+                    else {
+                        index_diff = item2->si.index - si1.index;
+                    }
+                    
+                    if (index_diff == 1 || index_diff == si1.path->size() - 1) {
+                        // Adjacent segments in the same path cannot intersect
+                        item2 = item2->nextItem;
+                        continue;
                     }
                 }
+                
+                result<intersection> res = check_intersection(si1, item2->si);
+                if (res.success) {
+                    listIntersections.push_back(res.data);
+                }
+                
                 item2 = item2->nextItem;
             }
-            item1 = item1->nextItem;
+            for (auto &si2 : newComers) {
+                if (si1.id <= si2.id) {
+                    // No self-intersections
+                    // Only one intersection per pair
+                    continue;
+                }
+                
+                if (si1.path == si2.path) {
+                    if (si1.index > si2.index) {
+                        index_diff = si1.index - si2.index;
+                    }
+                    else {
+                        index_diff = si2.index - si1.index;
+                    }
+
+                    if (index_diff == 1 || index_diff == si1.path->size() - 1) {
+                        // Adjacent segments in the same path cannot intersect
+                        continue;
+                    }
+                }
+                result<intersection> res = check_intersection(si1, si2);
+                if (res.success) {
+                    listIntersections.push_back(res.data);
+                }
+            }
         }
+        for (auto &si : newComers) {
+            itemLookup[si.id] = listActiveSegments.add(si);
+        }
+        newComers.clear();
     }
 
     return listIntersections;

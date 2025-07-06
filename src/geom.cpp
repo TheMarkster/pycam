@@ -78,21 +78,16 @@ vec2d line_segment::intersection_with_arc(const arc_segment& arc, bool arc_first
 
     // Use closest solution
     // Find offset vector and reduce length by b
-    vec2d offset_vector;
-    if (arc_first) {
-        offset_vector = intersection_point - this->end;
-    }
-    else {
-        offset_vector = intersection_point - this->start;
-    }
+    vec2d offset_vector = start - intersection_point;
     float distance = offset_vector.length();
-    offset_vector *= (distance - b) / distance;
-    
-    if (arc_first) {
-        return this->end + offset_vector;
-    } else {
-        return this->start + offset_vector;
+    if (distance < arc.radius) {
+        // Start point is inside the arc
+        // Reverse the offset vector
+        offset_vector = end - intersection_point;
+        distance = offset_vector.length();
     }
+    
+    return intersection_point + offset_vector / (distance * b);
 }
 
 arc_segment* arc_segment::from_compact_point(const compact_point& p0, const compact_point& p1) {
@@ -153,7 +148,7 @@ vec2d arc_segment::intersection_with_arc(const arc_segment& other, bool arg_firs
     float vlen = std::sqrt(vlen2);
     v = v / vlen; // Normalize vector
     float mp_distance = (pow(radius, 2) - pow(other.radius, 2) + vlen2) / (2 * vlen);
-    vec2d midpoint = center + v * (mp_distance / vlen);
+    vec2d midpoint = center + v * mp_distance;
     float solution_distance = std::sqrt(pow(radius, 2) - pow(mp_distance, 2));
 
     // Determine the direction of the solution
@@ -178,41 +173,31 @@ vec2d arc_segment::intersection_with_arc(const arc_segment& other, bool arg_firs
     return midpoint + n * solution_distance;
 }
 
-bool line_segment::on_segment(const vec2d& point) const {
+float line_segment::get_position(const vec2d& point) const {
     // Check if the point is on the line segment
-    vec2d start_to_point = point - start;
-    vec2d end_to_point = point - end;
-    return (start_to_point.dot(vhat) >= 0 && end_to_point.dot(vhat) <= 0);
+    vec2d diff = point - start;
+    vec2d end_to_point = end - start;
+    return diff.dot(vhat) / end_to_point.dot(vhat);
 }
 
-bool arc_segment::on_segment(const vec2d& point) const {
+float arc_segment::get_position(const vec2d& point) const {
     // We assume the point is on the circle
     // Verify it's an angle on the arc segment
     vec2d center_to_point = (point - center).normalized();
-    float angle = std::acos(center_to_point.v[0]) * (center_to_point.v[1] >= 0 ? 1 : -1); // Get angle in range [-pi, pi]
-    
-    if (is_clockwise()) { // clockwise arc
-        if (angle > start_angle) {
-            angle -= 2 * M_PI; // Adjust angle to be in range [start_angle, end_angle]
-        }
-        return angle >= end_angle;
+    float point_angle = angle(center_to_point) - start_angle;
+    float delta_angle = end_angle - start_angle;
+
+    if (delta_angle < 0 && point_angle > 0) {
+        point_angle -= 2 * M_PI;
+    } else if (delta_angle > 0 && point_angle < 0) {
+        // Normalize to [0, 2*pi)
+        point_angle += 2 * M_PI;
     }
-    else {
-        if (angle < start_angle) {
-            angle += 2 * M_PI; // Adjust angle to be in range [end_angle, start_angle]
-        }
-        return angle <= end_angle;
-    }
+
+    return point_angle / delta_angle;
 }
 
 result<vec2d> segment::intersects(const segment& other) const {
-    // Exclude adjacent segments
-    if (start.close(other.end)) {
-        return result<vec2d>{start, false};
-    }
-    if (end.close(other.start)) {
-        return result<vec2d>{end, false};
-    }
     vec2d intersection_point = intersection(other);
     bool success = on_segment(intersection_point) && other.on_segment(intersection_point);
     return result<vec2d>{intersection_point, success};
@@ -267,7 +252,7 @@ inline void intersect(segment* seg1, segment* seg2) {
     seg2->set_start_point(intersection);
 }
 
-path* path::offset(float distance, bool arc_join) {
+std::vector<path*> path::offset(float distance, bool arc_join, bool cull) {
     // Create a new path for the offset segments
     path *offset_path = new path();
     segment *prev = NULL;
@@ -275,13 +260,13 @@ path* path::offset(float distance, bool arc_join) {
     segment *temp = NULL;
     bool success;
 
-    prev = segments[segments.size() - 1]->clone();
+    prev = segments[segments.size() - 1]->copy();
     prev->offset(distance);
 
     segment *top;
     vec2d intersection;
     for (segment* seg : segments) {
-        offset_segment = seg->clone();
+        offset_segment = seg->copy();
         success = offset_segment->offset(distance);
 
         if (!success) {
@@ -313,37 +298,6 @@ path* path::offset(float distance, bool arc_join) {
             prev = offset_segment;
         }
         else {
-            // while (true) {
-            //     if (offset_path->segments.empty()) {
-            //         // No segments in the offset path, add the first segment
-            //         offset_path->add_segment(offset_segment);
-            //         prev = offset_segment;
-            //         break;
-            //     }
-                
-            //     top = offset_path->segments[offset_path->segments.size() - 1];
-            //     intersection = offset_segment->intersection(*top);
-
-            //     if (!top->set_end_point(intersection)) {
-            //         offset_path->segments.pop_back();
-            //         delete top;
-            //     }
-            //     else {
-            //         if (offset_segment->set_start_point(intersection)) {
-            //             // The segment is now valid
-            //             offset_path->add_segment(offset_segment);
-            //             prev = offset_segment;
-            //             break;
-            //         }
-            //         else {
-            //             // The segment is not valid, remove it
-            //             delete offset_segment;
-            //             prev = top;
-            //             break;
-            //         }
-            //     }
-            // }
-
             intersect(prev, offset_segment);
 
             offset_path->add_segment(offset_segment);
@@ -351,53 +305,33 @@ path* path::offset(float distance, bool arc_join) {
         }
     }
 
-    // Intersect first and last segments
-    // while (true) {
-    //     if (offset_path->segments.size() < 3) {
-    //         break;
-    //     }
-        
-    //     top = offset_path->segments[0];
-    //     prev = offset_path->segments[offset_path->segments.size() - 1];
-    //     intersection = prev->intersection(*top);
-
-    //     if (prev->set_end_point(intersection)) {
-    //         if (top->set_start_point(intersection)) {
-    //             break;
-    //         }
-    //         else {
-    //             // The segment is not valid, remove it
-    //             offset_path->segments.pop_back();
-    //             delete prev;
-    //         }
-    //     }
-    //     else {
-    //         offset_path->segments.erase(offset_path->segments.begin());
-    //         delete top;
-    //     }
-    // }
-
     // Close the start and end points
     prev->set_end_point(offset_path->segments[0]->start);
 
-    if (offset_path->segments.size() > 2) {
-        return offset_path;
-    } else if (offset_path->segments.size() == 2) {
-        // Valid if at least one arc segment
-        for (segment *seg : offset_path->segments) {
-            if (dynamic_cast<arc_segment*>(seg) != nullptr) {
-                return offset_path;
+    std::vector<path*> valid;
+    if (cull) {
+        std::vector<path*> closed_loops = offset_path->get_closed_loops();
+        delete offset_path;
+        bool cw = clockwise_winding();
+        for (path* loop : closed_loops) {
+            if (loop->clockwise_winding() == cw) {
+                valid.push_back(loop);
+            } else {
+                // Winding reverses when a sub loop inverts outside of 
+                // the main loop.
+                delete loop;
             }
         }
-    }
-    
-    // Not a valid path
-    while (!offset_path->segments.empty()) {
-        delete offset_path->segments.back();
-        offset_path->segments.pop_back();
+    } else {
+        valid.push_back(offset_path);
     }
 
-    return nullptr;
+    // Interior inverted loops have the correct winding
+    // Find them by look for enclosed paths
+    // TODO: Need to implement point in patht
+    // Or maybe keep track of shared points and delete the smaller loops?
+
+    return valid;
 }
 
 arc_segment* arc_segment::arc1(const vec2d & center, const vec2d & point, float angle) {
@@ -500,12 +434,12 @@ arc_segment* arc_segment::arc3(const vec2d & point1, const vec2d & point2, float
     return seg;
 }
 
-arc_segment* arc_segment::arc4(const vec2d & point1, const vec2d & point2, float height) {
+arc_segment* arc_segment::arc4(const vec2d & point1, const vec2d & point2, float bulge) {
     arc_segment *seg = new arc_segment();
 
     vec2d v21 = point2 - point1;
     float cl2 = v21.length() / 2;
-    float bulge = height / cl2;
+    // float bulge = height / cl2;
     vec2d midpoint = (point1 + point2) / 2;
     float angle = std::atan(bulge)*4.0f; // Convert bulge to angle
     float radius = cl2 / std::sin(angle / 2.0f);
@@ -532,14 +466,15 @@ arc_segment* arc_segment::arc4(const vec2d & point1, const vec2d & point2, float
     seg->start = point1;
     seg->end = point2;
     seg->center = center;
-    seg->radius = radius;
-    if (radius < 0) {
-        seg->start_angle = -angle_norm(n1);
-        seg->end_angle = seg->start_angle - angle;
-    } else {
-        seg->start_angle = angle_norm(n1);
-        seg->end_angle = seg->start_angle + angle;
-    }
+    seg->radius = std::abs(radius);
+    // if (radius < 0) {
+    //     seg->start_angle = modulo(angle_norm(n1) + 2*M_PI, 2*M_PI) - M_PI;
+    // }
+    // else {
+    //     seg->start_angle = angle_norm(n1);
+    // }
+    seg->start_angle = angle_norm(n1);
+    seg->end_angle = seg->start_angle + angle;
     seg->nhat_start = n1;
     seg->nhat_end = n2;
 
@@ -658,20 +593,6 @@ inline float arc_integral(float x)
     return area;
 }
 
-
-
-inline double modulo(double x, double m) {
-    return (x - std::floor(x / m) * m);
-}
-
-inline float modulo(float x, float m) {
-    return (x - std::floor(x / m) * m);
-}
-
-inline int modulo(int x, int m) {
-    return (x % m + m) % m; // Ensure non-negative result
-}
-
 float arc_segment::trap_area() const {
     // Calculates the signed area between the arc segment and the x-axis
     // 
@@ -742,6 +663,86 @@ struct path_or_intersection {
     intersection *theIntersection;
 };
 
+path *path_between(const std::vector<segment*> *orig, size_t start, size_t end, vec2d startPoint, vec2d endPoint) {
+    // Create a path between two intersections
+    path *temp = new path();
+
+    if (start == end) {
+        segment *seg = orig->at(start)->bisect(startPoint, false); // Bisect at start point
+        seg = seg->bisect(endPoint, true); // Bisect at end point
+        temp->add_segment(seg);
+        return temp;
+    }
+
+    size_t ii = start;
+
+    // Start point segment
+    temp->add_segment(orig->at(ii)->bisect(startPoint, false));
+    ii = (ii + 1) % orig->size();
+    
+    // Intermediate segments
+    while (ii != end) {
+        temp->segments.push_back(orig->at(ii)->copy());
+        ii = (ii + 1) % orig->size(); // Move to the next segment
+    }
+
+    // End point segment
+    temp->add_segment(orig->at(ii)->bisect(endPoint, true));
+
+    return temp;
+}
+
+inline bool matched_pair(const intersection& a, const intersection& b) {
+    // Check if two intersections are a matched pair
+    return (a.index1 == b.index2 && a.index2 == b.index1);
+}
+
+inline path* get_loop(const std::vector<intersection*> &stack, size_t start) {
+    // Create a path from the stack of intersections
+    
+    path *p;
+    const std::vector<segment*> *orig = stack[start]->path1;
+    if (matched_pair(*stack[start], *stack[start+1])) {
+        return path_between(orig, 
+            stack[start]->index1,   stack[start+1]->index1,
+            stack[start]->point,    stack[start+1]->point);
+    }
+
+    path *temp = new path();
+    
+    std::vector<const intersection*> points;
+    const intersection *prev = stack[start];
+    points.push_back(prev);
+    size_t i;
+    for (i=start+1; i<stack.size(); i++) {
+        intersection *current = stack[i];
+        if (matched_pair(*prev, *current)) {
+            // Flush the points out
+            if (points.size() > 1) {
+                p = path_between(orig, points[0]->index1, points.back()->index1, points[0]->point, points.back()->point);
+                temp->add_path(*p);
+                delete p;
+            }
+            points.clear();
+        }
+        points.push_back(current);
+        prev = current;
+    }
+
+    // if (!matched_pair(*stack[start], *stack.back())) {
+    //     points.push_back(stack[start]);
+    // }
+    
+    // Flush remaining points
+    if (points.size() > 1) {
+        p = path_between(orig, points[0]->index1, points.back()->index1, points[0]->point, points.back()->point);
+        temp->add_path(*p);
+        delete p;
+    }
+
+    return temp;
+}
+
 std::vector<path*> path::get_closed_loops() {
     // Return a vector of valid paths from the segments in this path
     std::vector<path*> valid_paths;
@@ -753,115 +754,162 @@ std::vector<path*> path::get_closed_loops() {
     // Iterate over the path and generate partial segments
     if (intersections.empty()) {
         // No intersections found, the path is valid as is
-        valid_paths.push_back(this);
+        valid_paths.push_back(copy());
         return valid_paths;
     }
 
     size_t n = intersections.size();
-    size_t i, j, ii, jj;
+    size_t i, j;
     for (i = 0; i < n; i++) {
         // Duplicate the intersections so we have one for each segment
         intersections.push_back(intersections[i]);
         intersections.back().index1 = (intersections[i].index2);
         intersections.back().index2 = (intersections[i].index1);
+        intersections.back().pos1 = intersections[i].pos2;
+        intersections.back().pos2 = intersections[i].pos1;
     }
 
     // Sort intersections by their segment indices
     std::sort(intersections.begin(), intersections.end(), [](const intersection& a, const intersection& b) {
-        return a.index1 < b.index1;
+        if (a.index1 < b.index1) return true;
+        if (a.index1 > b.index1) return false;
+
+        return a.pos1 < b.pos1;
     });
 
-    linked_list<path_or_intersection> stack;
-    linked_item<path_or_intersection> *item, *prevItem;
+    std::vector<intersection*> stack;
 
-    segment *seg;
-    path *temp, *merger;
-    intersection *prev, *current;
-    prev = &intersections[intersections.size() - 1]; // Start with the last intersection
-    for (i=0; i<intersections.size(); i++) {
-        current = &intersections[i];
-
-        // Create a path between the two intersections
-        temp = new path();
-        ii = prev->index1;
-        jj = current->index1;
-        seg = segments[prev->index1]->bisect(prev->point, false);
-        temp->add_segment(seg);
-        ii = (ii+1) % segments.size(); // Move to the next segment
-        while (ii != jj) {
-            seg = segments[ii];
-            temp->segments.push_back(seg->clone());
-            ii = (ii+1) % segments.size(); // Move to the next segment
-        }
-        seg = segments[current->index1]->bisect(current->point, true);
-        temp->add_segment(seg);
+    intersection *int1, *int2;
+    path *temp;
+    for (i=0; i < intersections.size(); i++) {
+        int1 = &intersections[i];
+        stack.push_back(int1);
         
-        // Add path to the stack
-        item = stack.add();
-        item->si.thePath = temp;
-        item->si.theIntersection = nullptr;
-
-        // Check if intersection has occurred
-        // If it has, pop all items until prev intersection is found
-        // Merge paths and add to output
-        item = stack.head;
-        size_t k;
-        while (item) {
-            if (item->si.theIntersection != nullptr) {
-                if (item->si.theIntersection->point.close(current->point)) {
-                    merger = new path(); // Clone the current path
-                    while (item) {
-                        if (item->si.thePath != nullptr) {
-                            // We have a segment to merge
-                            for (k = 0; k < item->si.thePath->segments.size(); k++) {
-                                merger->add_segment(item->si.thePath->segments[k]->clone());
-                            }
-
-                            delete item->si.thePath; // Free the path
-                        }
-
-                        prevItem = item;
-                        item = item->nextItem; // Move to the next item
-                        prevItem->remove();
-                    }
-
-                    valid_paths.push_back(merger);
-                    goto intersection_found; // Exit the loop
+        // Check if we've returned to the same intersection
+        // and created a loop
+        // TODO: Should we use a hashmap for faster lookups?
+        for (j=0; j<stack.size()-1; j++) {
+            int2 = stack[j];
+            if (matched_pair(*int1, *int2)) {
+                // Add the path to the output
+                temp = get_loop(stack, j);
+                if (temp->segments.empty()) {
+                    // If the path is empty, we can skip it
+                    delete temp;
+                    continue;
                 }
+                else { valid_paths.push_back(temp); }
+            
+                // Remove intermediate intersections along loop
+                stack.resize(j+1); 
+                stack.push_back(int1);
+
+                break;
             }
-            item = item->nextItem; // Move to the next item
         }
-
-        // First instance of intersection, add to stack
-        item = stack.add();
-        item->si.thePath = nullptr;
-        item->si.theIntersection = current; // Mark this intersection
-
-intersection_found:
-        prev = current;
     }
+
+    // Swap first and last points for last loop
+    // This is necessary to close the loop properly
+    intersection *last_intersection = stack.back();
+    stack.back() = stack[0];
+    stack[0] = last_intersection;
+    // stack.push_back(&intersections[0]); // Add the first intersection to close the loop
+    temp = get_loop(stack, 0);
+    if (temp->segments.empty()) {
+        // Should the last path ever be empty?
+        delete temp;
+    } else {
+        valid_paths.push_back(temp);
+    }
+
+//     segment *seg;
+//     path *temp, *merger;
+//     intersection *prev, *current;
+//     prev = &intersections[intersections.size() - 1]; // Start with the last intersection
+//     for (i=0; i<intersections.size(); i++) {
+//         current = &intersections[i];
+
+//         // Create a path between the two intersections
+//         temp = new path();
+//         ii = prev->index1;
+//         jj = current->index1;
+//         seg = segments[prev->index1]->bisect(prev->point, false);
+//         temp->add_segment(seg);
+//         ii = (ii+1) % segments.size(); // Move to the next segment
+//         while (ii != jj) {
+//             seg = segments[ii];
+//             temp->segments.push_back(seg->copy());
+//             ii = (ii+1) % segments.size(); // Move to the next segment
+//         }
+//         seg = segments[current->index1]->bisect(current->point, true);
+//         temp->add_segment(seg);
+        
+//         // Add path to the stack
+//         item = stack.add();
+//         item->si.thePath = temp;
+//         item->si.theIntersection = nullptr;
+
+//         // Check if we're returning to this intersection
+//         // If it has, pop all items until prev intersection is found
+//         // Merge paths and add to output
+//         item = stack.head;
+//         size_t k;
+//         while (item) {
+//             if (item->si.theIntersection != nullptr) {
+//                 if (item->si.theIntersection->point.close(current->point)) {
+//                     merger = new path(); // Clone the current path
+//                     while (item) {
+//                         if (item->si.thePath != nullptr) {
+//                             merger->add_path(*item->si.thePath);
+
+//                             delete item->si.thePath; // Free the path
+//                         }
+
+//                         prevItem = item;
+//                         item = item->nextItem; // Move to the next item
+//                         prevItem->remove();
+//                     }
+
+//                     valid_paths.push_back(merger);
+//                     goto intersection_found; // Exit the loop
+//                 }
+//             }
+//             item = item->nextItem; // Move to the next item
+//         }
+
+//         // First instance of intersection, add to stack
+//         item = stack.add();
+//         item->si.thePath = nullptr;
+//         item->si.theIntersection = current; // Mark this intersection
+
+// intersection_found:
+//         prev = current;
+//     }
 
     
-    if (stack.head) {
-        item = stack.head;
-        while (item != nullptr) {
-            merger = new path(); // Clone the current path
-            if (item->si.thePath) {
-                for (i=0; i < item->si.thePath->segments.size(); i++) {
-                    merger->add_segment(item->si.thePath->segments[i]->clone());
-                }
-                delete item->si.thePath; // Free the path
-            }
-            else {
-#ifdef DEBUG
-                // We have a path without a matching intersection
-                std::cout << "DEBUG: Found a path without a matching intersection." << std::endl;
-#endif
-            }
-            item = item->nextItem; // Move to the next item
-        }
-        valid_paths.push_back(merger);
-    }
+//     if (stack.head) {
+//         item = stack.head;
+//         while (item != nullptr) {
+//             merger = new path(); // Clone the current path
+//             if (item->si.thePath) {
+//                 // std::cout << "Start: " << item->si.thePath->segments[0]->start.to_string();
+//                 // std::cout << ", End: " << item->si.thePath->segments[0]->end.to_string() << std::endl;
+//                 for (i=0; i < item->si.thePath->segments.size(); i++) {
+//                     merger->add_segment(item->si.thePath->segments[i]->copy());
+//                 }
+//                 delete item->si.thePath; // Free the path
+//             }
+//             else {
+// #ifdef DEBUG
+//                 // We have a path without a matching intersection
+//                 std::cout << "DEBUG: Found a path without a matching intersection." << std::endl;
+// #endif
+//             }
+//             item = item->nextItem; // Move to the next item
+//         }
+//         valid_paths.push_back(merger);
+//     }
 
     return valid_paths;
 }

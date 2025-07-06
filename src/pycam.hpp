@@ -1,6 +1,10 @@
 #ifndef PYCAM_H
 #define PYCAM_H
 
+#include <cstddef>
+
+#define EPS 1e-6
+
 template <typename T>
 struct result {
     T data;
@@ -64,15 +68,7 @@ struct linked_list {
         tail = nullptr;
     }
 
-    size_t size() {
-        linked_item<T> *current = head;
-        size_t count = 0;
-        while (current) {
-            count++;
-            current = current->nextItem;
-        }
-        return count;
-    }
+    size_t size() const;
 
     linked_item<T>* add() {
         if (!tail) {

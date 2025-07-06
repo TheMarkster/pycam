@@ -9,9 +9,14 @@
 struct intersection {
     const std::vector<segment*> *path1;
     size_t index1;
+    float pos1; // Position on the segment in path1
     const std::vector<segment*> *path2;
     size_t index2;
+    float pos2; // Position on the segment in path2
     vec2d point;
+
+    // Default constructor
+    intersection() : path1(nullptr), index1(0), path2(nullptr), index2(0), point() {}
 };
 
 struct segment_info {
