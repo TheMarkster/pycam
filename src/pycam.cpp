@@ -2,6 +2,7 @@
 #include "intersection.hpp"
 #include <cmath>
 
+
 template <typename T>
 size_t linked_list<T>::size() const {
     linked_item<T> *current = head;

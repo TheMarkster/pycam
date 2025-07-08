@@ -7,6 +7,7 @@
 #include "pycam.hpp"
 #include <sstream>
 #include <iomanip>
+#include <iostream>
 
 struct compact_point {
     float v[3]; // x, y, bulge
@@ -56,12 +57,14 @@ public:
     virtual vec2d intersection_with_arc(const arc_segment& arc, bool arg_first) const = 0;
     
     virtual float trap_area() const = 0;
+    virtual float length() const = 0;
 
     result<vec2d> intersects(const segment &other) const;
 
     virtual bool set_start_point(const vec2d& point) = 0;
     virtual bool set_end_point(const vec2d& point) = 0;
     virtual float get_position(const vec2d & point) const = 0;
+    virtual bool valid() const = 0;
     bool on_segment(const vec2d& point, float epsilon = 1e-6) const {
         float pos = get_position(point);
         return (pos >= -epsilon && pos <= 1 + epsilon);
@@ -70,12 +73,7 @@ public:
     segment* bisect(const vec2d& point, bool before) const {
         // Calculate the new segments
         segment* seg;
-        if (before) {
-            if (point.close(start)) {
-                // If the point is at the start, we cannot create a segment before it
-                return nullptr;
-            }
-            
+        if (before) {            
             seg = copy(); // Create a copy of the segment
             
             if (!point.close(end)) {
@@ -85,11 +83,6 @@ public:
             return seg;
         }
         else {
-            if (point.close(end)) {
-                // If the point is at the end, we cannot create a segment after it
-                return nullptr;
-            }
-
             seg = copy(); // Create a copy of the segment
             
             if (!point.close(start)) {
@@ -110,13 +103,19 @@ public:
     float s;
 
 public:
+    line_segment(const vec2d& start, const vec2d& end, const vec2d nhat, const vec2d vhat, float s)
+        : segment(start, end), nhat(nhat), vhat(vhat), s(s) {}
     line_segment(const vec2d& start, const vec2d& end);
 
     vec2d get_nhat_start() const { return nhat; }
     vec2d get_nhat_end() const { return nhat; }
 
     segment* copy() const override {
-        return new line_segment(start, end);
+        return new line_segment(start, end, nhat, vhat, s);
+    }
+
+    float length() const override {
+        return (end - start).length();
     }
 
     static line_segment* from_compact_point(const compact_point& p0, const compact_point& p1) {
@@ -147,10 +146,19 @@ public:
 
     float trap_area() const override;
     float get_position(const vec2d &point) const override;
+    bool valid() const override {
+        // Check if the segment has non-zero length
+        if (start.close(end)) {
+            return false; // Zero-length segments are invalid
+        }
+        vec2d vhat_ref = (end - start).normalized();
+        return vhat_ref.dot(vhat) > 0; // Check if the direction is valid
+    }
 
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "LineSegment: Start(" << start.to_string() << "), End(" << end.to_string() << ")";
+        oss << ", Nhat(" << nhat.to_string() << "), Vhat(" << vhat.to_string() << ")";
         return oss.str();
     }
 protected:
@@ -177,17 +185,21 @@ public:
     vec2d get_nhat_end() const { return nhat_end; }
 
     static arc_segment* from_compact_point(const compact_point& p0, const compact_point& p1);
-    static arc_segment* arc1(const vec2d & center, const vec2d & point, float angle);
+    static arc_segment* arc1(const vec2d & center, const vec2d & point, float angle); // Two point arc segment
     static arc_segment* arc2(const vec2d & point1, const vec2d & point2, float radius, bool is_clockwise); // Three point arc segment
-    static arc_segment* arc3(const vec2d & point1, const vec2d & point2, float angle);
+    static arc_segment* arc3(const vec2d & point1, const vec2d & point2, float angle, bool invert = false);
     static arc_segment* arc4(const vec2d & point1, const vec2d & point2, float bulge);
     static arc_segment* arc5(const vec2d & point1, const vec2d & point2, const vec2d & point3);
 
-    bool is_clockwise() const { return radius > 0 ? end_angle < start_angle : end_angle > start_angle; }
+    bool is_clockwise() const { return end_angle < start_angle; }
 
     segment* copy() const override {
         arc_segment *temp = new arc_segment(start, end, center, nhat_start, nhat_end, radius, start_angle, end_angle);
         return temp;
+    }
+
+    float length() const override {
+        return std::abs((end_angle - start_angle) * radius);
     }
 
     float bulge() const { return std::tan((end_angle - start_angle) / 4.0f); };
@@ -211,12 +223,25 @@ public:
     vec2d intersection_with_arc(const arc_segment& other, bool arg_first) const override;
 
     float trap_area() const override;
+    bool valid() const override {
+        // Check for valid radius
+        if (std::abs(radius) < 1e-6) {
+            return false; // Invalid radius
+        }
+        // Check if start and end points are too close
+        if (start.close(end) && std::abs(end_angle - start_angle) < 1e-6) {
+            return false; // Zero-length arc
+        }
+        vec2d ref = vec2d(std::cos(start_angle), std::sin(start_angle)) * sgn(end_angle - start_angle);
+        return ref.dot(nhat_start) > 0; // Check if the direction is valid
+    }
 
     std::string to_string() const override {
         std::ostringstream oss;
         oss << "ArcSegment: Center(" << center.to_string() << "), Radius(" << radius << ")";
         oss << ", Start Angle(" << start_angle << "), End Angle(" << end_angle << ")";
         oss << ", Start(" << start.to_string() << "), End(" << end.to_string() << ")";
+        oss << ", Nhat Start(" << nhat_start.to_string() << "), Nhat End(" << nhat_end.to_string() << ")";
         return oss.str();
     }
 
@@ -272,6 +297,50 @@ public:
             segments.insert(segments.begin() + index, seg);
         } else {
             segments.push_back(seg);
+        }
+    }
+
+    void remove_invalid_segments() {
+        // Remove segments that are not valid
+        std::vector<segment*> valid_segments;
+        for (auto seg : segments) {
+            if (seg != nullptr && seg->valid()) {
+                valid_segments.push_back(seg);
+            } else {
+                delete seg; // Free memory for invalid segments
+            }
+        }
+        segments.clear();
+        for (auto seg : valid_segments) {
+            segments.push_back(seg);
+        }
+        valid_segments.clear();
+        // segments = std::move(valid_segments);
+    }
+
+    void cleanup() {
+        // Remove any zero length segments
+        size_t i = 0;
+        for (i=0; i<segments.size(); i++) {
+            segment* seg = segments[i];
+            if (seg->length() < 1e-3) {
+                delete seg; // Free memory for zero-length segments
+                // Update adjacent segments so they share the exact point
+                size_t prev_index = i == 0 ? segments.size() - 1 : i - 1;
+                size_t next_index = i == segments.size()-1 ? 0 : i + 1;
+                segments[prev_index]->set_end_point(segments[next_index]->start);
+                segments.erase(segments.begin() + i); // Remove the zero-length segment
+                i--; // Adjust index after removal
+            }
+
+            if (segments.size() < 3) {
+                // If we have less than 3 segments, the path is invalid
+                for (auto seg : segments) {
+                    delete seg; // Free memory for all segments
+                }
+                segments.clear();
+                return;
+            }
         }
     }
 

@@ -12,40 +12,70 @@
 #define BULGE_22p5 0.19891236738f // tan(22.5 degrees / 2)
 #define BULGE_15 0.13165249758f // tan(15 degrees / 2)
 
+std::vector<path*> offset(std::vector<path*> &paths, float distance, bool arc_join, bool cull, bool cleanup = false) {
+    std::vector<path*> offset_paths;
+    std::vector<path*> temp;
+    for (path* p : paths) {
+        temp = p->offset(distance, arc_join, cull);
+        for (auto &p2 : temp) {
+            if (p2->segments.empty()) {
+                delete p2; // Clean up empty paths
+            } else {
+                offset_paths.push_back(p2);
+            }
+        }
+
+        if (cleanup) {
+            delete p;
+        }
+    }
+
+    if (cleanup) {
+        paths.clear(); // Clear the original paths if we are cleaning up
+    }
+
+    return offset_paths;
+}
 
 int main() {
-    path *p = path::from_compact_array({
-        compact_point(5.00000, 3.24609, 0.00000),
-        compact_point(2.09566, 6.87652, -0.17030),
-        compact_point(1.00000, 10.00000, 0.00000),
-        compact_point(1.00000, 18.00000, -0.17030),
-        compact_point(2.09566, 21.12348, 0.00000),
-        compact_point(5.00000, 24.75390, 0.00000),
-        compact_point(5.00000, 23.00000, 0.00000),
-        compact_point(5.00000, 23.00000, 0.00000),
-        compact_point(5.00000, 24.75391, 0.00000),
-        compact_point(7.90434, 21.12348, -0.17030),
-        compact_point(9.00000, 18.00000, 0.00000),
-        compact_point(9.00000, 10.00000, -0.17030),
-        compact_point(7.90434, 6.87652, 0.00000),
-        compact_point(5.00000, 3.24609, 0.00000),
-        compact_point(5.00000, 5.00000, 0.00000),
-        compact_point(5.00000, 5.00000, 0.00000),
-    }, true);
-
-
+	path *p = path::from_compact_array({
+		compact_point(10.00000, 5.00000, 0.00000),
+		compact_point(6.00000, 10.00000, 0.00000),
+		compact_point(6.00000, 18.00000, 0.00000),
+		compact_point(10.00000, 23.00000, 0.00000),
+		compact_point(10.00000, 28.00000, 0.00000),
+		compact_point(-0.00000, 28.00000, 0.00000),
+		compact_point(-0.00000, 23.00000, 0.00000),
+		compact_point(4.00000, 18.00000, 0.00000),
+		compact_point(4.00000, 10.00000, 0.00000),
+		compact_point(0.00000, 5.00000, 0.00000),
+		compact_point(0.00000, 0.00000, 0.00000),
+		compact_point(10.00000, 0.00000, 0.00000),
+	}, true);
 
     std::cout << "Path: " << std::endl;
     std::cout << p->to_string() << std::endl;
 
-    std::vector<path*> paths = p->get_closed_loops();
+    std::vector<path*> paths;
+    paths.push_back(p); // Add the original path to the vector
 
+    size_t i;
+    for (i=0; i<1; i++) {
+        paths = offset(paths, -1, true, true, true);
+        
+        if (paths.empty()) {
+            std::cout << "No valid offset paths found." << std::endl;
+            break; // Exit if no valid paths are found
+        }
 
+        std::cout << "Path: " << std::endl;
+        for (path* offset_path : paths) {
+            std::cout << offset_path->to_string() << std::endl;
+        }
+    }
+    
     for (path* offset_path : paths) {
-        // std::cout << "Offset path with " << offset_path->segments.size() << " segments." << std::endl;
         delete offset_path; // Clean up allocated memory for each offset path
     }
-
-    delete p; // Clean up allocated memory
     return 0;
 }

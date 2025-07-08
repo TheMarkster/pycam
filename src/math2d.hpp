@@ -287,3 +287,10 @@ inline float modulo(float x, float m) {
 inline int modulo(int x, int m) {
     return (x % m + m) % m; // Ensure non-negative result
 }
+
+template <typename T>
+T sgn(T x) {
+    if (x>0) return 1.0f;
+    if (x<0) return -1.0f;
+    return 0.0f;
+}
