@@ -1,16 +1,70 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel",
+    "Cython>=0.29.0",
+    "numpy"
+]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pycam"
 version = "0.1.0"
-description = "A Python project named pycam"
+description = "A Python CAM (Computer-Aided Manufacturing) library with C++/Cython extensions"
 authors = [
     {name = "Mark Greene", email = "markdanielgreene@gmail.com"}
 ]
 readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Programming Language :: Cython",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "numpy>=1.19.0",
+]
 
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "jupyter",
+    "matplotlib",
+]
 
 [project.urls]
 homepage = "https://github.com/markg/pycam"
 repository = "https://github.com/markg/pycam"
+documentation = "https://github.com/markg/pycam"
+"Bug Tracker" = "https://github.com/markg/pycam/issues"
+
+[tool.setuptools]
+py-modules = ["pycam"]
+
+[tool.setuptools.package-data]
+"*" = ["*.so"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

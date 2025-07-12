@@ -8,10 +8,10 @@
             "name": "Debug C++ Test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/src/test",
+            "program": "${workspaceFolder}/src/cpp/test",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/src",
+            "cwd": "${workspaceFolder}/src/cpp",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
@@ -19,6 +19,11 @@
                 {
                     "description": "Enable pretty-printing for gdb",
                     "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set source path substitution",
+                    "text": "-gdb-set substitute-path /old/path ${workspaceFolder}/src/cpp",
                     "ignoreFailures": true
                 }
             ],

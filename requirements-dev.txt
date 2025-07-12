@@ -1,0 +1,14 @@
+# Development requirements for pycam
+numpy>=1.19.0
+cython>=0.29.0
+setuptools>=61.0
+wheel
+build
+pytest>=6.0
+pytest-cov
+black
+isort
+flake8
+mypy
+jupyter
+matplotlib

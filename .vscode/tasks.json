@@ -40,7 +40,7 @@
                 "math2d.cpp"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/src"
+                "cwd": "${workspaceFolder}/src/cpp"
             },
             "group": {
                 "kind": "build",
